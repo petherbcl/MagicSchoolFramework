@@ -1,0 +1,18 @@
+# Server-local persistence and secrets.
+/data/
+/docs/
+**/.env
+**/.env.local
+**/node_modules/
+/.tmp/
+/.packages/
+
+
+ArcaneMPServer.exe
+CLAUDE.md
+crashpad_handler.exe
+*.yml
+*.dll
+server.json
+*.log
+docs/**/*

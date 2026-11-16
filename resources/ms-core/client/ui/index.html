@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>MagicSchoolRP — Entrada</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">MAGICSCHOOL RP</p>
+    <h1 id="heading">A preparar a tua sessão</h1>
+    <p id="status" aria-live="polite">A comunicar com o servidor…</p>
+    <section id="registration" hidden>
+      <label for="user-id">O teu ID de registo</label>
+      <input id="user-id" type="text" readonly spellcheck="false" autocomplete="off">
+      <p class="hint">Usa este ID no formulário de allowlist da comunidade. A aprovação será detetada automaticamente.</p>
+      <div id="form-link" hidden>
+        <label for="form-url">Formulário externo — copia e abre no teu navegador</label>
+        <input id="form-url" type="text" readonly spellcheck="false" autocomplete="off">
+      </div>
+    </section>
+    <section id="selection" hidden>
+      <div id="characters"></div>
+      <form id="create" hidden>
+        <h2>Criar personagem</h2>
+        <div class="names">
+          <label>Nome<input name="firstName" minlength="2" maxlength="32" required autocomplete="off"></label>
+          <label>Apelido<input name="lastName" minlength="2" maxlength="32" required autocomplete="off"></label>
+        </div>
+        <label>Casa<select name="house">
+          <option value="Unaffiliated">Sem casa atribuída</option>
+          <option value="Gryffindor">Gryffindor</option><option value="Hufflepuff">Hufflepuff</option>
+          <option value="Ravenclaw">Ravenclaw</option><option value="Slytherin">Slytherin</option>
+        </select></label>
+        <button type="submit">Criar personagem</button>
+      </form>
+    </section>
+    <p id="notice" role="alert"></p>
+  </main>
+</body>
+</html>
