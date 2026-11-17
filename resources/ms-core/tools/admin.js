@@ -13,6 +13,7 @@ const help = `PostgreSQL administration (requires MS_DATABASE_URL):
   node resources/ms-core/tools/admin.js ban <numericId> <minutes|permanent> <reason>
   node resources/ms-core/tools/admin.js unban <numericId>
   node resources/ms-core/tools/admin.js recover <newPendingId> <originalId>
+  node resources/ms-core/tools/admin.js reset-key <numericId>
 Recovery requires operator verification of ownership, outside the game.`;
 async function main(args = process.argv.slice(2)) {
   const [command, userId, value, ...rest] = args;
@@ -40,6 +41,7 @@ async function main(args = process.argv.slice(2)) {
       }
       case "unban": await db.unban(userId, actor); console.log("Bans revoked."); break;
       case "recover": await db.recoverCredential(userId, value, actor); console.log("Credential reassigned. Reconnect with the new client."); break;
+      case "reset-key": await db.revokeCredentials(userId, actor); console.log("Keys revoked. The next client with this account's identifiers receives a new key."); break;
       default: throw new Error("Unknown command");
     }
   } finally { await db.close(); }

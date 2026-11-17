@@ -345,3 +345,80 @@ test("database configuration has no SQLite or OAuth fallback", () => {
   assert.throws(() => loadConfig({ MS_DATABASE_URL: "sqlite:example" }));
   assert.throws(() => loadConfig({ MS_ALLOWLIST_FORM_URL: "javascript:alert(1)" }));
 });
+
+// Loading-screen admission (playerConnecting): numeric ID before entering the world.
+const connection = (id, extra = {}) => ({ nickname: "Player " + id, discordId: "discord-" + id, hardwareId: "machine-" + id, ip: "127.0.0.1", ...extra });
+test("the loading screen registers a pending account and returns its numeric ID without admitting it", async t => {
+  const f = await fixture(t), first = await f.core.admit(connection(1));
+  assert.deepEqual([first.allowed, first.userId, first.allowlist, first.created], [false, "1", "pending", true]);
+  assert.match(first.message, /Registo n\.º 1 criado\. Aguarda aprovação/);
+  const again = await f.core.admit(connection(1));
+  assert.deepEqual([again.allowed, again.userId, again.created], [false, "1", false]);
+  assert.equal((await f.repository.listUsers()).length, 1);
+  assert.equal((await f.repository.pool.query("SELECT 1 FROM ms_core.ms_user_credentials")).rowCount, 0);
+  assert.equal((await f.repository.pool.query("SELECT 1 FROM ms_core.ms_sessions")).rowCount, 0);
+});
+test("the loading screen includes the form URL with the numeric ID", async t => {
+  const repository = new Repository(config), core = createCore({ repository, config: { ...config, formUrl: "https://forms.example/allowlist" }, game: {}, logger: { error() {} } });
+  t.after(async () => { await core.stop(); await repository.close(); });
+  assert.match((await core.admit(connection(1))).message, /https:\/\/forms\.example\/allowlist\?id=1/);
+});
+test("only approved accounts enter, and the game client then claims a key for the same ID", async t => {
+  const f = await fixture(t), { userId } = await f.core.admit(connection(1));
+  await f.repository.setAllowlist(userId, "approved", "console:test");
+  const admitted = await f.core.admit(connection(1));
+  assert.equal(admitted.allowed, true); assert.match(admitted.message, /Registo n\.º 1 aprovado/);
+  const account = await f.register(1);
+  assert.equal(account.userId, userId); assert.ok(account.credential);
+  assert.equal(f.core.api.Users.get(1).status, "selectingCharacter");
+  assert.equal((await f.repository.listUsers()).length, 1);
+  await f.core.attach({ ...f.player(3), discordId: "discord-1" });
+  await assert.rejects(f.core.register(3, { sessionId: f.core.api.Users.get(3).sessionId, credential: null }), { code: "IDENTIFIER_ALREADY_REGISTERED" });
+});
+test("identifiers alone never hand over an account that already holds a key", async t => {
+  const f = await fixture(t), original = await f.ready(1); await f.core.disconnect(1);
+  assert.equal((await f.core.admit(connection(1))).allowed, true);
+  await f.core.attach({ ...f.player(2), discordId: "discord-1", hardwareId: "machine-1" });
+  await assert.rejects(f.core.register(2, { sessionId: f.core.api.Users.get(2).sessionId, credential: null }), { code: "IDENTIFIER_ALREADY_REGISTERED" });
+  assert.equal((await f.register(3, original.credential)).userId, original.userId);
+});
+test("reset-key lets the next client with the account identifiers claim a new key", async t => {
+  const f = await fixture(t), original = await f.ready(1); await f.core.disconnect(1);
+  await f.repository.revokeCredentials(original.userId, "console:test");
+  const claimed = await f.register(1);
+  assert.equal(claimed.userId, original.userId); assert.notEqual(claimed.credential, original.credential);
+  await f.core.attach(f.player(2));
+  await assert.rejects(f.core.register(2, { sessionId: f.core.api.Users.get(2).sessionId, credential: original.credential }), { code: "INVALID_CREDENTIAL" });
+});
+test("the loading screen rejects denied, banned and already-online accounts with their ID", async t => {
+  const f = await fixture(t), online = await f.ready(1);
+  assert.match((await f.core.admit(connection(1))).message, /Registo n\.º 1: esta conta já está ligada/);
+  const { userId } = await f.core.admit(connection(2));
+  await f.repository.setAllowlist(userId, "denied", "console:test");
+  const denied = await f.core.admit(connection(2));
+  assert.equal(denied.allowed, false); assert.match(denied.message, /Registo n\.º 2: o pedido de allowlist foi recusado/);
+  await f.core.disconnect(1); await f.repository.ban(online.userId, "Teste", null, "console:test");
+  const banned = await f.core.admit(connection(1));
+  assert.equal(banned.allowed, false); assert.match(banned.message, /Registo n\.º 1 bloqueado: Teste/);
+});
+test("the loading screen requires an account identifier and refuses ambiguous owners", async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.core.admit({ nickname: "x", ip: "127.0.0.1" }), { code: "IDENTIFIER_REQUIRED" });
+  await f.core.admit(connection(1)); await f.core.admit(connection(2));
+  await assert.rejects(f.core.admit(connection(3, { discordId: "discord-1", hardwareId: "machine-2" })), { code: "IDENTIFIER_CONFLICT" });
+  assert.equal((await f.repository.listUsers()).length, 2);
+});
+test("simultaneous handshakes with the same identifiers create a single account", async t => {
+  const f = await fixture(t), other = new Repository({ ...config, poolSize: 2 });
+  t.after(() => other.close());
+  const results = await Promise.all([f.repository.admission(connection(1)), other.admission(connection(1)), other.admission(connection(1))]);
+  assert.deepEqual([...new Set(results.map(r => r.userId))], ["1"]);
+  assert.equal((await f.repository.listUsers()).length, 1);
+});
+test("recovery accepts a loading-screen account that never received a key", async t => {
+  const f = await fixture(t), original = await f.ready(1); await f.core.disconnect(1);
+  const { userId } = await f.core.admit(connection(2));
+  await f.repository.recoverCredential(userId, original.userId, "console:test");
+  const claimed = await f.register(2);
+  assert.equal(claimed.userId, original.userId);
+});

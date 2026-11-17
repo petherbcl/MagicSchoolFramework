@@ -47,13 +47,20 @@ class Repository {
         check(row, "UNKNOWN_CREDENTIAL"); check(!row.revoked_at, "INVALID_CREDENTIAL"); id = String(row.user_id);
         await db.query("UPDATE ms_core.ms_users SET last_seen_at=now() WHERE id=$1", [id]);
       } else {
-        for (const [kind, value] of values) {
-          if (UNIQUE_IDENTIFIERS.includes(kind)) check(!(await db.query("SELECT 1 FROM ms_core.ms_connection_identifiers WHERE kind=$1 AND value=$2", [kind, value])).rowCount, "IDENTIFIER_ALREADY_REGISTERED");
+        const owners = await this.owners(db, values);
+        if (owners.length) {
+          // Accounts created at the loading screen have no key yet: the first client claims it.
+          // An account that already holds an active key is never handed over by identifiers alone.
+          check(owners.length === 1, "IDENTIFIER_ALREADY_REGISTERED"); id = owners[0];
+          await db.query("SELECT id FROM ms_core.ms_users WHERE id=$1 FOR UPDATE", [id]);
+          check(!(await db.query("SELECT 1 FROM ms_core.ms_user_credentials WHERE user_id=$1 AND revoked_at IS NULL", [id])).rowCount, "IDENTIFIER_ALREADY_REGISTERED");
+          await db.query("INSERT INTO ms_core.ms_user_credentials(token_hash,user_id) VALUES($1,$2)", [newHash, id]);
+          await db.query("UPDATE ms_core.ms_users SET last_seen_at=now() WHERE id=$1", [id]);
+          await this.audit(db, "registration", "credential.issued", id);
+        } else {
+          id = await this.createUser(db);
+          await db.query("INSERT INTO ms_core.ms_user_credentials(token_hash,user_id) VALUES($1,$2)", [newHash, id]);
         }
-        id = String((await db.query("INSERT INTO ms_core.ms_users DEFAULT VALUES RETURNING id")).rows[0].id);
-        await db.query("INSERT INTO ms_core.ms_user_credentials(token_hash,user_id) VALUES($1,$2)", [newHash, id]);
-        await db.query("INSERT INTO ms_core.ms_user_roles VALUES($1,'player')", [id]);
-        await this.audit(db, "registration", "user.created", id);
       }
       // The unique index resolves competing registrations, including across processes.
       // Any conflict rolls back the user, credential, role and audit together.
@@ -62,6 +69,57 @@ class Repository {
           ON CONFLICT(user_id,kind,value) DO UPDATE SET last_seen_at=now()`, [id, kind, value]);
       }
       return this.getUser(id, db);
+    });
+  }
+  async owners(db, values) {
+    const unique = values.filter(([kind]) => UNIQUE_IDENTIFIERS.includes(kind));
+    if (!unique.length) return [];
+    return (await db.query(`SELECT DISTINCT user_id FROM ms_core.ms_connection_identifiers
+      WHERE (kind,value) IN (SELECT * FROM unnest($1::text[],$2::text[])) ORDER BY user_id`,
+    [unique.map(([kind]) => kind), unique.map(([, value]) => value)])).rows.map(row => String(row.user_id));
+  }
+  async createUser(db) {
+    const id = String((await db.query("INSERT INTO ms_core.ms_users DEFAULT VALUES RETURNING id")).rows[0].id);
+    await db.query("INSERT INTO ms_core.ms_user_roles VALUES($1,'player')", [id]);
+    await this.audit(db, "registration", "user.created", id);
+    return id;
+  }
+  // Loading-screen admission: finds or creates the account owning the announced identifiers.
+  // New accounts get no key here; the in-game client claims one after approval.
+  async admission(identifiers = {}) {
+    const values = Object.entries(observed(identifiers));
+    check(values.some(([kind]) => UNIQUE_IDENTIFIERS.includes(kind)), "IDENTIFIER_REQUIRED");
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.transaction(async db => {
+          const owners = await this.owners(db, values);
+          check(owners.length <= 1, "IDENTIFIER_CONFLICT");
+          let id = owners[0], created = false;
+          if (id) {
+            // Matching only refreshes what already belongs to the account; new device IDs
+            // are bound later, once the in-game key check passes.
+            await db.query("UPDATE ms_core.ms_users SET last_seen_at=now() WHERE id=$1", [id]);
+            for (const [kind, value] of values) await db.query("UPDATE ms_core.ms_connection_identifiers SET last_seen_at=now() WHERE user_id=$1 AND kind=$2 AND value=$3", [id, kind, value]);
+          } else {
+            id = await this.createUser(db); created = true;
+            for (const [kind, value] of values.sort(([a], [b]) => a.localeCompare(b))) {
+              await db.query("INSERT INTO ms_core.ms_connection_identifiers(user_id,kind,value) VALUES($1,$2,$3)", [id, kind, value]);
+            }
+          }
+          return { ...(await this.getUser(id, db)), created };
+        });
+      } catch (error) {
+        // A concurrent handshake created the owner first: look it up again once.
+        if (error.code === "IDENTIFIER_ALREADY_REGISTERED" && attempt === 0) continue;
+        throw error;
+      }
+    }
+  }
+  async revokeCredentials(id, actor) {
+    await this.transaction(async db => {
+      check(await this.getUser(id, db), "USER_NOT_FOUND");
+      await db.query("UPDATE ms_core.ms_user_credentials SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [id]);
+      await this.audit(db, actor, "credential.revoked", id);
     });
   }
   async verifyCredential(tokenHash, userId) {
@@ -73,7 +131,8 @@ class Repository {
       const rows = (await db.query("SELECT id,allowlist FROM ms_core.ms_users WHERE id=$1 OR id=$2 ORDER BY id FOR UPDATE", [pendingId, originalId])).rows;
       check(rows.length === 2 && rows.find(row => String(row.id) === pendingId).allowlist === "pending", "RECOVERY_REQUIRES_PENDING_ACCOUNT");
       check(Number((await db.query("SELECT count(*) AS n FROM ms_core.ms_characters WHERE user_id=$1", [pendingId])).rows[0].n) === 0, "RECOVERY_REQUIRES_EMPTY_ACCOUNT");
-      check((await db.query("SELECT 1 FROM ms_core.ms_user_credentials WHERE user_id=$1 AND revoked_at IS NULL", [pendingId])).rowCount > 0, "INVALID_CREDENTIAL");
+      // A pending account created at the loading screen may have no key yet; the next
+      // client with its identifiers then claims the original account.
       await db.query("UPDATE ms_core.ms_user_credentials SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [originalId]);
       await db.query("UPDATE ms_core.ms_user_credentials SET user_id=$1 WHERE user_id=$2 AND revoked_at IS NULL", [originalId, pendingId]);
       await db.query(`UPDATE ms_core.ms_connection_identifiers a SET first_seen_at=least(a.first_seen_at,b.first_seen_at),last_seen_at=greatest(a.last_seen_at,b.last_seen_at)

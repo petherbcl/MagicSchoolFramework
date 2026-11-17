@@ -156,6 +156,26 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     try { await evaluate(s); }
     catch (error) { if (current(s)) await detach(s, "accessCheckFailed", "Não foi possível verificar o acesso."); throw error; }
   }
+  // Runs during the native handshake (loading screen), before any Player exists.
+  // Only approved accounts are admitted; everyone else leaves with their numeric ID.
+  async function admit(connection) {
+    check(!closing, "CORE_STOPPING");
+    check(sessions.size < config.maxSessions, "SESSION_LIMIT");
+    const user = await repository.admission(observed(connection));
+    const ban = await repository.activeBan(user.userId);
+    const id = "ID: " + user.userId;
+    const result = (allowed, message) => ({ allowed, userId: user.userId, allowlist: user.allowlist, created: user.created, message });
+    if (ban) return result(false, id + " bloqueado: " + ban.reason +
+      (ban.expires_at ? " (até " + new Date(ban.expires_at).toISOString().slice(0, 16).replace("T", " ") + " UTC)." : "."));
+    if (user.allowlist === "denied") return result(false, id + ": o pedido de allowlist foi recusado.");
+    if (user.allowlist !== "approved") {
+      const url = formUrl(user.userId);
+      return result(false, id + (user.created ? " criado." : ".") + " Aguarda aprovação da allowlist. " +
+        (url ? "Formulário: " + url : "Envia este ID à equipa.") + " Volta a ligar depois de aprovado.");
+    }
+    if (accounts.has(user.userId)) return result(false, id + ": esta conta já está ligada ao servidor.");
+    return result(true, id + " aprovado. A entrar em Hogwarts...");
+  }
   async function hasPermission(id, permission) {
     const s = sessions.get(id); if (!s || s.status !== "ready") return false;
     try { return permitted(await access(s), permission); } catch { return false; }
@@ -214,7 +234,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     } finally { checking = false; }
   }
   const api = Object.freeze({
-    version: "0.2.0",
+    version: "0.3.0",
     Users: Object.freeze({
       get: id => sessions.has(id) ? clone(snapshot(sessions.get(id))) : null,
       getOnlineById: id => accounts.has(String(id)) ? clone(snapshot(accounts.get(String(id)))) : null,
@@ -247,7 +267,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
       create: createCharacter, select: selectCharacter, save: async id => save(session(id)),
     }),
   });
-  return { api, attach, register, credentialStored, loaded, tick,
+  return { api, admit, attach, register, credentialStored, loaded, tick,
     guard(id) { const s = sessions.get(id); return () => Boolean(s && current(s)); },
     sync(id) { send(session(id)); },
     disconnect(id) { const s = sessions.get(id); return s ? detach(s, "disconnect") : Promise.resolve(); },

@@ -18,7 +18,21 @@ function safe(player, fn) {
     else { console.error("[ms-core] operation failed: " + (error.code || error.name)); player.kick("Erro da framework. Tenta novamente."); }
   });
 }
-Events.on("playerConnecting", connection => { if (!ready) connection.reject("Framework indisponível: verifica a configuração PostgreSQL."); });
+const admissionErrors = { IDENTIFIER_REQUIRED: "Não foi possível obter um identificador Steam, Epic, Discord ou de hardware. Contacta a equipa.",
+  IDENTIFIER_CONFLICT: "Os teus identificadores estão associados a mais do que um registo. Contacta a equipa.",
+  SESSION_LIMIT: "O servidor está cheio. Tenta novamente mais tarde.", CORE_STOPPING: "A framework está a reiniciar. Tenta novamente." };
+// The handshake waits for the returned promise: the result is shown on the joining screen.
+Events.on("playerConnecting", connection => {
+  if (!ready) { connection.reject("Framework indisponível: verifica a configuração PostgreSQL."); return; }
+  connection.update("A verificar o registo...");
+  return core.admit(connection).then(result => {
+    if (!connection.isPending()) return;
+    if (result.allowed) connection.update(result.message); else connection.reject(result.message);
+  }, error => {
+    if (!(error instanceof CoreError)) console.error("[ms-core] admission failed: " + (error.code || error.name));
+    if (connection.isPending()) connection.reject(admissionErrors[error.code] || "Não foi possível verificar o registo. Tenta novamente.");
+  });
+});
 Events.on("playerConnect", player => {
   if (!ready) { player.kick("Framework indisponível."); return; }
   player.setSpawn(config.spawn);
