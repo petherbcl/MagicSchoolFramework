@@ -1,0 +1,39 @@
+{
+  "name": "ms-character",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MagicSchoolRP character lobby: selection, creation and persistence per ms-core account",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "build:ui": "npm --prefix ui-src run build",
+    "dev:ui": "npm --prefix ui-src run dev"
+  },
+  "mafiahub": {
+    "serverScripts": [
+      "server/main.js"
+    ],
+    "clientScripts": [
+      "client/main.js"
+    ],
+    "files": [
+      "client/ui/**"
+    ],
+    "exports": [
+      "Characters"
+    ],
+    "resourceDependencies": [
+      "ms-core"
+    ],
+    "errorBehavior": "stop"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "@electric-sql/pglite-socket": "0.2.19"
+  }
+}

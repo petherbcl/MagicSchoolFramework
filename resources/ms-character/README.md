@@ -1,0 +1,80 @@
+# ms-character
+
+Lobby de personagens do MagicSchoolRP (versão 0.1.0). Depende do [ms-core](../ms-core/README.md): o jogador só chega aqui depois de a conta estar aprovada e a chave local verificada.
+
+## Fluxo
+
+1. O ms-core emite `ms:playerReady`. O ms-character volta a confirmar a sessão e leva o jogador para o **lobby**: um mundo privado, invisível, invulnerável e preso ao ponto do lobby.
+2. A UI do lobby mostra as personagens da conta, começando pela última jogada:
+   - **Sem personagens:** abre diretamente o formulário de criação (nome, apelido e casa).
+   - **Com personagens:** o jogador escolhe uma com "Jogar" ou cria outra, até `MS_MAX_CHARACTERS`.
+3. Ao escolher, o servidor confirma que a personagem pertence à conta e restaura-a: viagem para Overland, inventário, look, casa e posição guardada. Uma personagem nova aparece no spawn.
+4. O jogador sai do lobby para o mundo 0 e o recurso emite `ms:characterReady`.
+5. A personagem é guardada automaticamente (`MS_SAVE_INTERVAL_SECONDS`) e quando o jogador sai. Os saves usam controlo de versão, por isso um save desatualizado é recusado.
+
+Se o restauro nativo falhar, o jogador é desligado, porque o estado ficaria a meio. Nesse caso não se emite `ms:characterReady` e não se grava nada.
+
+## Configuração
+
+Por omissão usa o `MS_DATABASE_URL` do `resources/ms-core/.env`. Um `.env` próprio (ver [.env.example](.env.example)) e as variáveis de ambiente do processo têm prioridade.
+
+| Variável | Default | Função |
+| --- | --- | --- |
+| `MS_CHARACTER_POOL_SIZE` | 3 | Pool PostgreSQL, 1–20 |
+| `MS_MAX_CHARACTERS` | 1 | Personagens por conta, 1–5 |
+| `MS_SAVE_INTERVAL_SECONDS` | 30 | Autosave, 5–300 |
+
+As coordenadas do lobby e do spawn de personagens novas estão em [server/config.js](server/config.js).
+
+## Base de dados
+
+O recurso cria o schema `ms_character` com a tabela `ms_character.characters`, que referencia `ms_core.ms_users(id)`. O schema do ms-core tem de existir primeiro. Tal como no ms-core, não há migrations: o schema é criado com `IF NOT EXISTS` em cada arranque. A criação de personagens fica registada em `ms_core.ms_audit_log` (`character.created`).
+
+Uma BD criada antes da versão 0.4.0 do ms-core tem as personagens em `ms_core.ms_characters`. Para as passar para aqui, correr uma vez:
+
+```sql
+INSERT INTO ms_character.characters(user_id,first_name,last_name,house,state,version,created_at,updated_at)
+SELECT user_id,first_name,last_name,house,state,version,created_at,updated_at FROM ms_core.ms_characters ORDER BY id;
+```
+
+## Integração
+
+```javascript
+Events.on("ms:characterReady", ({ playerId, sessionId, characterId }) => {
+  const Core = Exports.get("ms-core", "Core"), Characters = Exports.get("ms-character", "Characters");
+  if (Core.Users.get(playerId)?.sessionId !== sessionId || !Characters.isPlaying(playerId)) return;
+  const character = Characters.getSelected(playerId); // { characterId, firstName, lastName, house, state, ... }
+});
+```
+
+- **Eventos de servidor:** `ms:characterLobby` e `ms:characterReady`.
+- **API (`Characters`):** `isPlaying`, `getSelected`, `list` e `save`. Os tipos estão em [types/characters.d.ts](types/characters.d.ts).
+- **Eventos de rede:** `ms-character:sync`, `ms-character:create` e `ms-character:select` (cliente → servidor); `ms-character:state` e `ms-character:notice` (servidor → cliente).
+
+## UI (React + Tailwind)
+
+O código da UI está em [ui-src/](ui-src/) e usa Vite, React 19 e Tailwind CSS 4. O build gera os ficheiros estáticos em `client/ui/`, que são distribuídos aos clientes através de `"files": ["client/ui/**"]`. **Não edites `client/ui/` à mão**: é apagado e gerado de novo em cada build.
+
+```powershell
+npm.cmd ci --prefix resources/ms-character/ui-src
+npm.cmd run build:ui --prefix resources/ms-character   # gera client/ui/
+npm.cmd run dev:ui --prefix resources/ms-character     # browser normal, com servidor simulado
+```
+
+- **`npm run dev`:** num browser normal não existe `callEvent`, por isso [src/bridge.js](ui-src/src/bridge.js) simula o servidor (lista, criação, entrada). Assim dá para construir ecrãs sem abrir o jogo.
+- **Comunicação com o cliente:** `send(name, payload)` envia para o cliente; o hook `useLobby()` recebe `state` e `notice`. O contrato está documentado no `bridge.js`.
+- **Build para o CEF:**
+  - O bundle é um script clássico (IIFE com `defer`) e não um ES module. Isto evita problemas de CORS do esquema `fw://`.
+  - O CSS sai num ficheiro único e a CSP (`'self'` apenas) é injetada só no build. Estilos injetados por JS seriam bloqueados pela CSP.
+  - A renderização no jogo é por software: evitar WebGL, `backdrop-filter` e animações pesadas.
+- **Cores:** são tokens Tailwind definidos em [src/index.css](ui-src/src/index.css) (`bg-ink`, `text-gold`, `border-brass`…).
+- **Fazer commit de `client/ui/`:** depois de cada alteração à UI, corre o build e faz commit do `client/ui/` gerado. O servidor distribui esses ficheiros tal como estão.
+
+## Testes
+
+```powershell
+npm.cmd ci --prefix resources/ms-character
+npm.cmd test --prefix resources/ms-character
+```
+
+Os testes usam PGlite embebido e um adaptador nativo simulado. O `node resources/ms-core/tools/smoke-runtime.js` também arranca este recurso no executável real.

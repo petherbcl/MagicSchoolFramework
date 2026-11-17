@@ -2,7 +2,7 @@
 
 Framework base do MagicSchoolRP (versão 0.4.0). Gere contas PostgreSQL com ID numérico, admissão no ecrã de entrada, allowlist externa, chave local, roles e bans. A especificação completa (fluxo, esquema, SQL para a aplicação do formulário, recuperação de contas) está em [docs/MS_CORE.md](../../docs/MS_CORE.md).
 
-**Fora do âmbito:** personagens. A criação, a seleção e a persistência (inventário, look e localização) ficam num recurso próprio, que depende do ms-core e associa as personagens ao `userId`.
+**Fora do âmbito:** personagens. A criação, a seleção e a persistência (inventário, look e localização) ficam no recurso [ms-character](../ms-character/README.md), que depende do ms-core, abre o lobby de personagens no `ms:playerReady` e associa as personagens ao `userId`.
 
 ## Fluxo
 

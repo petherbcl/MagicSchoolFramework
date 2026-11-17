@@ -29,19 +29,26 @@ async function main() {
   const directory = path.join(root, ".tmp", "ms-core-postgres-" + crypto.randomBytes(5).toString("hex"));
   fs.mkdirSync(path.join(directory, "resources"), { recursive: true });
   const destination = path.join(directory, "resources", "ms-core");
-  fs.cpSync(resource, destination, { recursive: true, filter: file =>
-    !path.relative(resource, file).split(path.sep).includes("node_modules") && !path.basename(file).startsWith(".env") });
-  for (const entry of fs.readdirSync(path.join(resource, "node_modules"), { withFileTypes: true })) {
-    if (entry.isDirectory() && !entry.name.startsWith("@") && !entry.name.startsWith(".")) {
-      fs.cpSync(path.join(resource, "node_modules", entry.name), path.join(destination, "node_modules", entry.name), { recursive: true });
+  // Copy a resource without secrets (.env) and with production node_modules only (dev deps are scoped @...).
+  function copyResource(source, target) {
+    fs.cpSync(source, target, { recursive: true, filter: file =>
+      !path.relative(source, file).split(path.sep).includes("node_modules") && !path.basename(file).startsWith(".env") });
+    for (const entry of fs.readdirSync(path.join(source, "node_modules"), { withFileTypes: true })) {
+      if (entry.isDirectory() && !entry.name.startsWith("@") && !entry.name.startsWith(".")) {
+        fs.cpSync(path.join(source, "node_modules", entry.name), path.join(target, "node_modules", entry.name), { recursive: true });
+      }
     }
   }
+  copyResource(resource, destination);
+  copyResource(path.join(root, "resources", "ms-character"), path.join(directory, "resources", "ms-character"));
   fs.cpSync(path.join(root, "resources", "my-gamemode"), path.join(directory, "resources", "my-gamemode"), { recursive: true });
   const probe = path.join(directory, "resources", "ms-smoke"); fs.mkdirSync(probe);
-  fs.writeFileSync(path.join(probe, "package.json"), JSON.stringify({ name: "ms-smoke", mafiahub: { serverScripts: ["main.js"], resourceDependencies: ["ms-core"] } }));
+  fs.writeFileSync(path.join(probe, "package.json"), JSON.stringify({ name: "ms-smoke", mafiahub: { serverScripts: ["main.js"], resourceDependencies: ["ms-core", "ms-character"] } }));
   fs.writeFileSync(path.join(probe, "main.js"), `Events.on("resourceStart", async name => {
     if(name!=="ms-smoke") return; const core=Exports.get("ms-core","Core");
     if(core.version!=="0.4.0" || core.Users.isReady(12345)!==false || await core.Users.hasPermission(12345,"admin")!==false) throw new Error("Invalid core export");
+    const characters=Exports.get("ms-character","Characters");
+    if(!characters || characters.version!=="0.1.0" || characters.isPlaying(12345)!==false || characters.getSelected(12345)!==null) throw new Error("Invalid character export");
     console.log("MS_CORE_POSTGRES_PROBE_OK"); });`);
   const engine = await PGlite.create(), server = new PGLiteSocketServer({ db: engine, host: "127.0.0.1", port: 0, maxConnections: 8 });
   let child, admin;
@@ -62,7 +69,7 @@ async function main() {
       while (Date.now() < deadline && child.exitCode === null) { if (predicate(log())) return; await delay(100); }
       throw new Error("Runtime startup/reload failed: " + log().slice(-6000));
     }
-    await waitFor(text => text.includes("MS_CORE_POSTGRES_PROBE_OK") && text.includes("Server successfully started"));
+    await waitFor(text => text.includes("MS_CORE_POSTGRES_PROBE_OK") && text.includes("character lobby ready") && text.includes("Server successfully started"));
     admin = new Repository({ ...loadConfig({}), databaseUrl: connection, poolSize: 1 });
     const registered = await admin.register(null, crypto.createHash("sha256").update("isolated-smoke-account").digest("hex"), { hardwareId: "isolated-smoke-device" });
     if (registered.userId !== "1" || registered.allowlist !== "pending") throw new Error("Numeric PostgreSQL ID failed");
@@ -74,7 +81,9 @@ async function main() {
     const timeout = new Promise((resolve, reject) => { alarm = setTimeout(() => reject(new Error("Shutdown timeout")), 12000); alarm.unref(); });
     const [code] = await Promise.race([exit, timeout]).finally(() => clearTimeout(alarm));
     if (code !== 0 || log().toLowerCase().includes("[error]")) throw new Error(log().slice(-6000));
-    console.log("PASS: PostgreSQL schema, numeric registration, external approval, native export, ensure and clean shutdown");
+    const tables = (await admin.pool.query("SELECT to_regclass('ms_character.characters') AS t")).rows[0].t;
+    if (!tables) throw new Error("ms-character schema missing");
+    console.log("PASS: PostgreSQL schema, numeric registration, external approval, ms-core and ms-character exports, ensure and clean shutdown");
     console.log("Isolated runtime logs: " + directory);
   } finally {
     if (child && child.exitCode === null) { child.kill(); await once(child, "exit").catch(() => {}); }

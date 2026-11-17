@@ -7,6 +7,6 @@
     "clientScripts": ["client/main.js"],
     "serverScripts": ["server/main.js"],
     "files": ["client/main.js"],
-    "resourceDependencies": ["ms-core"]
+    "resourceDependencies": ["ms-core", "ms-character"]
   }
 }

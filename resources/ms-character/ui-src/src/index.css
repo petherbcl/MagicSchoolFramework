@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* MagicSchoolRP palette, shared by every lobby screen (bg-ink, text-gold, border-brass...). */
+@theme {
+  --color-ink: #141e27;
+  --color-night: #0c151d;
+  --color-parchment: #eee8d9;
+  --color-gold: #d5b87b;
+  --color-brass: #756344;
+  --color-mist: #b4b9bd;
+  --color-ember: #f2c19a;
+  --font-serif: Georgia, "Times New Roman", serif;
+}
+
+html, body, #root { height: 100%; }
+body { margin: 0; background: rgb(9 16 22 / 0.94); color: var(--color-parchment); font-family: var(--font-serif); }
