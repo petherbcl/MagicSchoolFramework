@@ -1,7 +1,7 @@
 "use strict";
 const { Pool } = require("pg");
 const schema = require("./schema");
-const { check, json, characterInput, publicId, CoreError, observed, UNIQUE_IDENTIFIERS } = require("../validation");
+const { check, json, publicId, CoreError, observed, UNIQUE_IDENTIFIERS } = require("../validation");
 
 class Repository {
   constructor(config, { pool } = {}) {
@@ -155,7 +155,6 @@ class Repository {
     await this.transaction(async db => {
       const rows = (await db.query("SELECT id,allowlist FROM ms_core.ms_users WHERE id=$1 OR id=$2 ORDER BY id FOR UPDATE", [pendingId, originalId])).rows;
       check(rows.length === 2 && rows.find(row => String(row.id) === pendingId).allowlist === "pending", "RECOVERY_REQUIRES_PENDING_ACCOUNT");
-      check(Number((await db.query("SELECT count(*) AS n FROM ms_core.ms_characters WHERE user_id=$1", [pendingId])).rows[0].n) === 0, "RECOVERY_REQUIRES_EMPTY_ACCOUNT");
       // A pending account created at the loading screen may have no key yet; the next
       // client with its identifiers then claims the original account.
       await db.query("UPDATE ms_core.ms_user_credentials SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [originalId]);
@@ -220,22 +219,6 @@ class Repository {
       await db.query("UPDATE ms_core.ms_users SET metadata=$1 WHERE id=$2", [json(row.metadata, 65536), id]);
       await this.audit(db, actor, "user.metadata", id, { key }); return this.getUser(id, db);
     });
-  }
-  mapCharacter(row) { return row ? { characterId: String(row.id), userId: String(row.user_id), firstName: row.first_name, lastName: row.last_name, house: row.house, state: row.state, version: row.version } : null; }
-  async getCharacter(id) { return this.mapCharacter((await this.pool.query("SELECT * FROM ms_core.ms_characters WHERE id=$1", [publicId(id)])).rows[0]); }
-  async listCharacters(id) { return (await this.pool.query("SELECT * FROM ms_core.ms_characters WHERE user_id=$1 ORDER BY id", [publicId(id)])).rows.map(row => this.mapCharacter(row)); }
-  async createCharacter(userId, input, maxCharacters) {
-    const value = characterInput(input);
-    return this.transaction(async db => {
-      check((await db.query("SELECT id FROM ms_core.ms_users WHERE id=$1 FOR UPDATE", [publicId(userId)])).rowCount, "USER_NOT_FOUND");
-      check(Number((await db.query("SELECT count(*) AS n FROM ms_core.ms_characters WHERE user_id=$1", [userId])).rows[0].n) < maxCharacters, "CHARACTER_LIMIT");
-      const row = (await db.query("INSERT INTO ms_core.ms_characters(user_id,first_name,last_name,house) VALUES($1,$2,$3,$4) RETURNING *", [userId, value.firstName, value.lastName, value.house])).rows[0];
-      await this.audit(db, "user:" + userId, "character.created", userId, { characterId: String(row.id) }); return this.mapCharacter(row);
-    });
-  }
-  async saveCharacter(id, userId, expectedVersion, state) {
-    const result = await this.pool.query("UPDATE ms_core.ms_characters SET state=$1,version=version+1,updated_at=now() WHERE id=$2 AND user_id=$3 AND version=$4 RETURNING *", [json(state, 2 * 1024 * 1024), publicId(id), publicId(userId), expectedVersion]);
-    check(result.rowCount === 1, "REVISION_CONFLICT"); return this.mapCharacter(result.rows[0]);
   }
   async close() { if (!this.closed) { this.closed = true; await this.pool.end(); } }
 }

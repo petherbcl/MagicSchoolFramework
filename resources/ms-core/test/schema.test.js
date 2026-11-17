@@ -18,7 +18,7 @@ test("schema uses numeric identities only", async () => {
   await repository.createSchema();
   const result = await repository.pool.query(`SELECT table_name,column_name,data_type,is_identity FROM information_schema.columns
     WHERE table_schema='ms_core' AND column_name='id' ORDER BY table_name`);
-  assert.deepEqual(result.rows.map(r => r.table_name), ["ms_audit_log", "ms_bans", "ms_characters", "ms_sessions", "ms_users"]);
+  assert.deepEqual(result.rows.map(r => r.table_name), ["ms_audit_log", "ms_bans", "ms_sessions", "ms_users"]);
   for (const row of result.rows) { assert.equal(row.data_type, "bigint"); assert.equal(row.is_identity, "YES"); }
   assert.equal((await repository.pool.query("SELECT 1 FROM information_schema.columns WHERE table_schema='ms_core' AND udt_name='uuid'")).rowCount, 0);
 });

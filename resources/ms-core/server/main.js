@@ -4,11 +4,9 @@ const { Repository } = require("./database/repository");
 const { createCore } = require("./core");
 const { createGameAdapter } = require("./game");
 const { CoreError } = require("./validation");
-let core, repository, game, config, tickTimer, saveTimer, ready = false;
+let core, repository, game, config, tickTimer, ready = false;
 const calls = new Map();
-const messages = { INVALID_NAME: "Usa nomes com 2 a 32 caracteres.", INVALID_HOUSE: "Escolhe uma casa válida.",
-  CHARACTER_LIMIT: "Atingiste o limite de personagens.", CHARACTER_NOT_FOUND: "A personagem não pertence à tua conta.",
-  NOT_AUTHENTICATED: "Aguarda a identificação da tua conta.", INVALID_SESSION_STATE: "Aguarda a etapa atual.",
+const messages = { NOT_AUTHENTICATED: "Aguarda a identificação da tua conta.", INVALID_SESSION_STATE: "Aguarda a etapa atual.",
   RATE_LIMITED: "Aguarda antes de repetir.", FORBIDDEN: "Não tens permissão.", INVALID_ID: "ID inválido." };
 function safe(player, fn) {
   const same = core?.guard(player.id) || (() => false);
@@ -43,8 +41,6 @@ Events.on("loadingFinished", player => { if (ready && core.api.Users.get(player.
 Events.on("playerDisconnect", player => {
   calls.delete(player.id); if (core) core.disconnect(player.id).catch(() => console.error("[ms-core] disconnect persistence failed"));
 });
-Events.on("playerTeleportComplete", (player, requestId, status) => game?.complete(player.id, "teleport", requestId, status));
-Events.on("playerMapTravelComplete", (player, requestId, status) => game?.complete(player.id, "map", requestId, status));
 Events.onClient("ms-core:sync", player => {
   if (!ready || !core.api.Users.get(player.id)) return;
   const now = Date.now(); if (now - (calls.get(player.id) || 0) < 1000) return;
@@ -52,10 +48,6 @@ Events.onClient("ms-core:sync", player => {
 });
 Events.onClient("ms-core:register", (player, input) => { if (ready) safe(player, () => core.register(player.id, input)); });
 Events.onClient("ms-core:credentialStored", (player, input) => { if (ready) safe(player, () => core.credentialStored(player.id, input)); });
-Events.onClient("ms-core:createCharacter", (player, input) => { if (ready) safe(player, () => core.api.Characters.create(player.id, input)); });
-Events.onClient("ms-core:selectCharacter", (player, input) => {
-  if (ready && input && typeof input.characterId === "string" && input.characterId.length <= 19) safe(player, () => core.api.Characters.select(player.id, input.characterId));
-});
 Events.on("chatCommand", (player, message, command) => { if (ready && ["id", "registo"].includes(command)) safe(player, () => core.sync(player.id)); });
 Events.on("resourceStart", async name => {
   if (name !== "ms-core") return;
@@ -67,7 +59,6 @@ Events.on("resourceStart", async name => {
     if (!Exports.register("Core", core.api)) throw new Error("EXPORT_REGISTRATION_FAILED");
     ready = true;
     tickTimer = setInterval(() => core.tick().catch(() => console.error("[ms-core] access polling failed")), config.accessPollMs);
-    saveTimer = setInterval(() => core.saveAll().catch(() => console.error("[ms-core] autosave failed")), config.saveIntervalMs);
     for (const player of PlayerManager.getAll()) core.attach(player, Boolean(player.location()))
       .catch(error => console.error("[ms-core] session start failed: " + (error.code || error.name)));
     console.log("[ms-core] PostgreSQL ready; numeric registration IDs and external allowlist enabled");
@@ -78,6 +69,6 @@ Events.on("resourceStart", async name => {
 });
 Events.on("resourceStop", async name => {
   if (name !== "ms-core") return;
-  ready = false; if (tickTimer) clearInterval(tickTimer); if (saveTimer) clearInterval(saveTimer);
+  ready = false; if (tickTimer) clearInterval(tickTimer);
   if (core) await core.stop(); if (repository) await repository.close();
 });

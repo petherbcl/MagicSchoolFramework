@@ -17,11 +17,11 @@ function envFile(t, content) {
 }
 
 test("resource env files support BOM, quoted values and comments", t => {
-  const file = envFile(t, '\uFEFF# fixture\nMS_DATABASE_URL="postgresql://user:example%23%3D@localhost/test"\nMS_MAX_CHARACTERS=2 # comment\n');
+  const file = envFile(t, '\uFEFF# fixture\nMS_DATABASE_URL="postgresql://user:example%23%3D@localhost/test"\nMS_ACCESS_POLL_SECONDS=7 # comment\n');
   const config = loadConfig({}, { envFile: file });
   assert.equal(config.databaseConfigured, true);
   assert.equal(config.databaseUrl, "postgresql://user:example%23%3D@localhost/test");
-  assert.equal(config.maxCharacters, 2);
+  assert.equal(config.accessPollMs, 7000);
 });
 test("host environment overrides the file without mutating the host object", t => {
   const file = envFile(t, "MS_DATABASE_URL=postgresql://file/test\nMS_DATABASE_POOL_SIZE=7\n");

@@ -15,7 +15,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     catch { logger.error("[ms-core] event handler failed: " + name); }
   };
   const snapshot = s => ({ sessionId: s.sessionId, playerId: s.playerId, userId: s.userId,
-    characterId: s.character?.characterId || null, status: s.status, authenticated: s.authenticated,
+    status: s.status, authenticated: s.authenticated,
     allowlist: s.user?.allowlist || null, roles: s.user?.roles || [], metadata: s.user?.metadata || {},
     identifiers: { observed: s.observed }, credentialConfirmed: s.credentialConfirmed });
   function formUrl(userId) {
@@ -25,9 +25,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
   function send(s) {
     if (!current(s)) return;
     game.send(s.player, "ms-core:session", { sessionId: s.sessionId, status: s.status, serverKey: config.serverKey,
-      userId: s.userId, allowlist: s.user?.allowlist || null, formUrl: formUrl(s.userId),
-      characters: s.characters.map(({ characterId, firstName, lastName, house }) => ({ characterId, firstName, lastName, house })),
-      maxCharacters: config.maxCharacters });
+      userId: s.userId, allowlist: s.user?.allowlist || null, formUrl: formUrl(s.userId) });
     if (s.status === "awaitingCredentialStorage" && s.newCredential) {
       game.send(s.player, "ms-core:credential", { sessionId: s.sessionId, serverKey: config.serverKey, credential: s.newCredential });
     }
@@ -39,34 +37,19 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     ensure(s); check(user && user.allowlist === "approved", "ALLOWLIST_REQUIRED"); check(!ban, "ACCOUNT_BANNED");
     s.user = user; return user;
   }
-  function save(s) {
-    if (s.status !== "ready" || !s.character) return Promise.resolve(false);
-    // Take the snapshot synchronously while a disconnect handle is still valid.
-    let state;
-    try { state = game.capture(s.player, clone(s.character.state)); }
-    catch (error) { return Promise.reject(error); }
-    const task = s.saveChain.catch(() => {}).then(async () => {
-      s.character = await repository.saveCharacter(s.character.characterId, s.userId, s.character.version, state);
-      return true;
-    });
-    s.saveChain = task; return task;
-  }
   function detach(s, reason, kickMessage) {
     if (sessions.get(s.playerId) !== s) return Promise.resolve();
-    const saving = save(s);
     s.status = "closed"; s.newCredential = null;
     sessions.delete(s.playerId);
     if (accounts.get(s.userId) === s) accounts.delete(s.userId);
     try { game.cancel(s); } catch { logger.error("[ms-core] native cleanup failed"); }
     if (kickMessage) game.kick(s.player, kickMessage);
-    const task = saving.catch(() => logger.error("[ms-core] character save failed during disconnect"))
-      .then(async () => {
-        const id = await s.persisting;
-        if (id !== null) {
-          await repository.endSession(id, reason);
-          event("ms:sessionEnded", { sessionId: id, userId: s.userId, reason });
-        }
-      }).catch(() => logger.error("[ms-core] session close failed"));
+    const task = s.persisting.then(async id => {
+      if (id !== null) {
+        await repository.endSession(id, reason);
+        event("ms:sessionEnded", { sessionId: id, userId: s.userId, reason });
+      }
+    }).catch(() => logger.error("[ms-core] session close failed"));
     closingTasks.add(task); task.finally(() => closingTasks.delete(task)); return task;
   }
   async function attach(player, loaded = false) {
@@ -75,9 +58,9 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     check(!closing && sessions.size < config.maxSessions, "SESSION_LIMIT");
     const s = { sessionId: null, persisting: Promise.resolve(null), playerId: player.id, player, observed: observed(player),
       userId: null, user: null, authenticated: false, credentialConfirmed: false, newCredential: null,
-      status: "connecting", loaded, characters: [], character: null, saveChain: Promise.resolve(),
+      status: "connecting", loaded,
       world: config.quarantineWorldBase + (++worldSequence), expiresAt: clock() + config.approvalTimeoutMs,
-      lastActionAt: 0, registration: null };
+      registration: null };
     sessions.set(player.id, s);
     try {
       game.restrict(player, s);
@@ -98,16 +81,23 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
       await detach(s, ban ? "banned" : "allowlistDenied", ban ? "Conta bloqueada: " + ban.reason : "O teu pedido de allowlist foi recusado."); return;
     }
     if (user.allowlist !== "approved") {
-      if (s.status === "ready" || s.status === "applyingCharacter" || s.status === "waitingForWorld") {
+      if (s.status === "ready" || s.status === "waitingForWorld") {
         await detach(s, "accessRevoked", "O acesso à conta foi alterado."); return;
       }
       s.status = "awaitingApproval"; send(s); return;
     }
     if (s.status === "awaitingApproval" || s.status === "checkingAccess") {
-      s.characters = await repository.listCharacters(s.userId); ensure(s);
-      s.status = "selectingCharacter"; s.expiresAt = clock() + config.approvalTimeoutMs; send(s);
+      s.status = "waitingForWorld"; s.expiresAt = clock() + config.approvalTimeoutMs; send(s);
       event("ms:userAuthenticated", snapshot(s));
     }
+    if (s.status === "waitingForWorld") enter(s);
+  }
+  // Approved, key verified and world loaded: leave quarantine. Characters belong to other resources.
+  function enter(s) {
+    if (!current(s) || s.status !== "waitingForWorld") return;
+    if (!s.loaded) return; // loadingFinished calls enter again.
+    game.release(s.player, s); s.status = "ready"; send(s);
+    event("ms:playerReady", { playerId: s.playerId, sessionId: s.sessionId, userId: s.userId });
   }
   function register(playerId, input) {
     const s = session(playerId);
@@ -202,40 +192,9 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     const s = session(id);
     check(await hasPermission(id, permission), "FORBIDDEN"); ensure(s); return "user:" + s.userId;
   }
-  async function createCharacter(id, value) {
-    const s = session(id); check(s.status === "selectingCharacter", "INVALID_SESSION_STATE");
-    check(clock() - s.lastActionAt >= 750, "RATE_LIMITED"); s.lastActionAt = clock();
-    check(permitted(await access(s), "characters.create"), "FORBIDDEN"); ensure(s);
-    const character = await repository.createCharacter(s.userId, value, config.maxCharacters); ensure(s);
-    s.characters = await repository.listCharacters(s.userId); ensure(s); send(s); return clone(character);
-  }
-  async function apply(s) {
-    if (!current(s) || s.status !== "waitingForWorld" || !s.loaded) return;
-    s.status = "applyingCharacter";
-    try {
-      await access(s);
-      await game.apply(s.player, clone(s.character), () => current(s) && s.status === "applyingCharacter", s.sessionId);
-      ensure(s); await access(s);
-      game.release(s.player, s); s.status = "ready";
-      await save(s); ensure(s); send(s);
-      event("ms:playerReady", { playerId: s.playerId, sessionId: s.sessionId, userId: s.userId, characterId: s.character.characterId });
-    } catch (error) { if (current(s)) await detach(s, "characterApplyFailed", "Não foi possível carregar a personagem."); throw error; }
-  }
-  async function selectCharacter(id, characterId) {
-    const s = session(id); check(s.status === "selectingCharacter", "INVALID_SESSION_STATE");
-    s.status = "selecting";
-    try {
-      check(permitted(await access(s), "characters.select"), "FORBIDDEN");
-      const character = await repository.getCharacter(publicId(characterId)); ensure(s);
-      check(character && character.userId === s.userId, "CHARACTER_NOT_FOUND");
-      s.character = character; s.status = "waitingForWorld"; send(s);
-      if (s.loaded) await apply(s);
-      return { characterId: character.characterId, status: s.status };
-    } catch (error) { if (current(s) && s.status === "selecting") { s.status = "selectingCharacter"; send(s); } throw error; }
-  }
   async function loaded(id) {
     const s = session(id); s.loaded = true;
-    if (s.status === "waitingForWorld") await apply(s);
+    if (s.status === "waitingForWorld") enter(s);
     else if (s.status !== "ready") { game.restrict(s.player, s); send(s); }
   }
   async function tick() {
@@ -244,7 +203,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
       for (const s of [...sessions.values()]) {
         if (!current(s)) continue;
         if (s.status !== "ready" && s.expiresAt <= clock()) { await detach(s, "timeout", "O tempo de espera terminou. Volta a ligar com o mesmo cliente."); continue; }
-        if (s.userId && s.credentialConfirmed && !["checkingAccess", "registering", "selecting"].includes(s.status)) {
+        if (s.userId && s.credentialConfirmed && !["checkingAccess", "registering"].includes(s.status)) {
           try { await evaluate(s); }
           catch { if (current(s)) await detach(s, "databaseUnavailable", "A base de dados está indisponível."); }
         }
@@ -252,7 +211,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     } finally { checking = false; }
   }
   const api = Object.freeze({
-    version: "0.3.0",
+    version: "0.4.0",
     Users: Object.freeze({
       get: id => sessions.has(id) ? clone(snapshot(sessions.get(id))) : null,
       getOnlineById: id => accounts.has(String(id)) ? clone(snapshot(accounts.get(String(id)))) : null,
@@ -265,7 +224,6 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
         const user = await repository.setMetadata(id, key, metadata(key, value), author);
         if (accounts.has(id)) accounts.get(id).user = user; return clone(user.metadata);
       },
-      save: async id => save(session(id)),
     }),
     Allowlist: Object.freeze({
       approve: async (id, source) => { const result = await repository.setAllowlist(publicId(id), "approved", await actor(source, "allowlist.manage")); await tick(); return clone(result); },
@@ -279,19 +237,11 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
       add: async (id, reason, expiresAt, source) => { const value = await repository.ban(publicId(id), reason, expiresAt, await actor(source, "bans.manage")); await tick(); return value; },
       revoke: async (id, source) => repository.unban(publicId(id), await actor(source, "bans.manage")),
     }),
-    Characters: Object.freeze({
-      list: async id => { const s = session(id); await access(s); return clone((await repository.listCharacters(s.userId)).map(({ state, ...row }) => row)); },
-      getSelected: id => sessions.get(id)?.character ? clone(sessions.get(id).character) : null,
-      create: createCharacter, select: selectCharacter, save: async id => save(session(id)),
-    }),
   });
   return { api, admit, attach, register, credentialStored, loaded, tick,
     guard(id) { const s = sessions.get(id); return () => Boolean(s && current(s)); },
     sync(id) { send(session(id)); },
     disconnect(id) { const s = sessions.get(id); return s ? detach(s, "disconnect") : Promise.resolve(); },
-    async saveAll() { await Promise.all([...sessions.values()].map(async s => {
-      try { await save(s); } catch { if (current(s)) await detach(s, "saveFailed", "Não foi possível guardar os dados."); }
-    })); },
     async stop() { if (closing) return; closing = true; await Promise.all([...sessions.values()].map(s => detach(s, "resourceStop", "A framework reiniciou. Volta a ligar."))); await Promise.all([...closingTasks]); },
   };
 }

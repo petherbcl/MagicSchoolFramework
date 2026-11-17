@@ -56,11 +56,9 @@ function loadConfig(env = process.env, options = {}) {
     poolSize: integer(env, "MS_DATABASE_POOL_SIZE", 5, 1, 20), queryTimeoutMs: 10000,
     approvalTimeoutMs: integer(env, "MS_APPROVAL_TIMEOUT_SECONDS", 1800, 60, 86400) * 1000,
     accessPollMs: integer(env, "MS_ACCESS_POLL_SECONDS", 5, 1, 60) * 1000,
-    saveIntervalMs: integer(env, "MS_SAVE_INTERVAL_SECONDS", 30, 5, 300) * 1000,
-    maxCharacters: integer(env, "MS_MAX_CHARACTERS", 1, 1, 5),
     maxSessions: 128, quarantineWorldBase: 3000000000,
     spawn: { position: { x: 366784, y: -461527, z: -82610 }, yaw: -130 },
-    rolePermissions: { player: ["characters.create", "characters.select", "users.metadata.self"],
+    rolePermissions: { player: ["users.metadata.self"],
       moderator: ["users.read", "allowlist.manage", "bans.manage"], admin: ["*"] },
   });
 }

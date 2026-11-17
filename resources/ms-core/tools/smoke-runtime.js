@@ -41,7 +41,7 @@ async function main() {
   fs.writeFileSync(path.join(probe, "package.json"), JSON.stringify({ name: "ms-smoke", mafiahub: { serverScripts: ["main.js"], resourceDependencies: ["ms-core"] } }));
   fs.writeFileSync(path.join(probe, "main.js"), `Events.on("resourceStart", async name => {
     if(name!=="ms-smoke") return; const core=Exports.get("ms-core","Core");
-    if(core.version!=="0.3.0" || core.Users.isReady(12345)!==false || await core.Users.hasPermission(12345,"admin")!==false) throw new Error("Invalid core export");
+    if(core.version!=="0.4.0" || core.Users.isReady(12345)!==false || await core.Users.hasPermission(12345,"admin")!==false) throw new Error("Invalid core export");
     console.log("MS_CORE_POSTGRES_PROBE_OK"); });`);
   const engine = await PGlite.create(), server = new PGLiteSocketServer({ db: engine, host: "127.0.0.1", port: 0, maxConnections: 8 });
   let child, admin;

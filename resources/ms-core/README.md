@@ -2,7 +2,7 @@
 
 Core inicial do MagicSchoolRP. Instruções de instalação, API e limites em [docs/MS_CORE.md](../../docs/MS_CORE.md).
 
-PostgreSQL, registo automático com ID numérico para formulário externo, allowlist, permissões, bans e persistência de personagens. Identificação automática por chave local gerada pelo servidor; sem OAuth2. Requer `MS_DATABASE_URL` e o driver `pg`.
+PostgreSQL, registo automático com ID numérico para formulário externo, allowlist, permissões e bans. Personagens (criação, seleção, persistência) ficam num recurso próprio. Identificação automática por chave local gerada pelo servidor; sem OAuth2. Requer `MS_DATABASE_URL` e o driver `pg`.
 
 ```powershell
 npm.cmd test --prefix resources/ms-core

@@ -1,6 +1,5 @@
 "use strict";
 
-const HOUSES = ["Unaffiliated", "Gryffindor", "Hufflepuff", "Ravenclaw", "Slytherin"];
 const UNIQUE_IDENTIFIERS = Object.freeze(["steamId", "epicId", "discordId", "hardwareId"]);
 
 class CoreError extends Error {
@@ -23,17 +22,6 @@ function json(value, maxBytes = 16384) {
   check(typeof encoded === "string" && Buffer.byteLength(encoded) <= maxBytes, "JSON_TOO_LARGE");
   return encoded;
 }
-function characterInput(value) {
-  check(value && typeof value === "object", "INVALID_CHARACTER");
-  const name = (input) => {
-    check(typeof input === "string", "INVALID_NAME");
-    const normalized = input.trim().normalize("NFC");
-    check(normalized.length >= 2 && normalized.length <= 32 && /^[\p{L}][\p{L}\p{M}' -]*$/u.test(normalized), "INVALID_NAME");
-    return normalized;
-  };
-  check(HOUSES.includes(value.house), "INVALID_HOUSE");
-  return { firstName: name(value.firstName), lastName: name(value.lastName), house: value.house };
-}
 function metadata(key, value) {
   check(typeof key === "string" && /^[a-z][a-zA-Z0-9_.:-]{0,63}$/.test(key) &&
     !["userId", "roles", "allowlist", "identities", "permissions", "prototype", "constructor"].includes(key), "INVALID_METADATA_KEY");
@@ -53,4 +41,4 @@ function publicId(value) {
   check(typeof id === "string" && /^[1-9][0-9]{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n, "INVALID_ID");
   return id;
 }
-module.exports = { CoreError, check, clone, json, characterInput, metadata, observed, HOUSES, publicId, UNIQUE_IDENTIFIERS };
+module.exports = { CoreError, check, clone, json, metadata, observed, publicId, UNIQUE_IDENTIFIERS };

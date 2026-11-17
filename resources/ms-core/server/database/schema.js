@@ -23,13 +23,6 @@ CREATE TABLE IF NOT EXISTS ms_core.ms_connection_identifiers (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ms_connection_identifiers_unique_owner ON ms_core.ms_connection_identifiers(kind,value)
  WHERE kind IN ('steamId','epicId','discordId','hardwareId');
-CREATE TABLE IF NOT EXISTS ms_core.ms_characters (
- id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES ms_core.ms_users(id),
- first_name TEXT NOT NULL,last_name TEXT NOT NULL,house TEXT NOT NULL,
- state JSONB NOT NULL DEFAULT '{"inventory":[],"look":null,"location":null}',version INTEGER NOT NULL DEFAULT 0,
- created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS ms_characters_user ON ms_core.ms_characters(user_id);
 CREATE TABLE IF NOT EXISTS ms_core.ms_bans (
  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES ms_core.ms_users(id),reason TEXT NOT NULL,actor TEXT NOT NULL,
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),expires_at TIMESTAMPTZ,revoked_at TIMESTAMPTZ

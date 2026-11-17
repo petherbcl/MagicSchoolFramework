@@ -9,6 +9,7 @@ const { createCore } = require("../server/core");
 const { loadConfig } = require("../server/config");
 const digest = value => crypto.createHash("sha256").update(value).digest("hex");
 let engine, server, bootstrap, config;
+const connection = (id, extra = {}) => ({ nickname: "Player " + id, discordId: "discord-" + id, hardwareId: "machine-" + id, ip: "127.0.0.1", ...extra });
 
 before(async () => {
   engine = await PGlite.create();
@@ -22,17 +23,15 @@ beforeEach(async () => { await bootstrap.pool.query("TRUNCATE ms_core.ms_users R
 
 async function fixture(t, overrides = {}) {
   let now = 1000000;
-  const repository = new Repository(config), sent = [], kicks = [], events = [], applied = [];
-  const game = { restrict() {}, release() {}, cancel() {},
+  const repository = new Repository(config), sent = [], kicks = [], events = [], released = [];
+  const game = { restrict() {}, release(p) { released.push(p.id); }, cancel() {},
     send(p, name, payload) { sent.push({ playerId: p.id, name, payload }); },
-    kick(p, reason) { kicks.push({ playerId: p.id, reason }); },
-    async apply(p, character) { applied.push({ playerId: p.id, character }); },
-    capture(p, previous) { return { ...previous, inventory: previous.inventory || [] }; }, ...overrides };
+    kick(p, reason) { kicks.push({ playerId: p.id, reason }); }, ...overrides };
   const core = createCore({ repository, config, game, clock: () => now, emit: (name, payload) => events.push({ name, payload }), logger: { error() {} } });
   t.after(async () => { await core.stop(); await repository.close(); });
   const player = id => ({ id, connected: true, nickname: "Player " + id, discordId: "discord-" + id, hardwareId: "machine-" + id });
-  async function register(id = 1, credential = null, confirm = true) {
-    await core.attach(player(id), true);
+  async function register(id = 1, credential = null, confirm = true, loaded = true) {
+    await core.attach(player(id), loaded);
     const s = core.api.Users.get(id);
     await core.register(id, { sessionId: s.sessionId, credential });
     const issued = sent.filter(v => v.playerId === id && v.name === "ms-core:credential").at(-1)?.payload.credential;
@@ -42,11 +41,9 @@ async function fixture(t, overrides = {}) {
   async function ready(id = 1) {
     const account = await register(id);
     await repository.setAllowlist(account.userId, "approved", "console:test"); await core.tick();
-    const character = await core.api.Characters.create(id, { firstName: "Ana", lastName: "Silva", house: "Ravenclaw" });
-    await core.api.Characters.select(id, character.characterId);
-    return { ...account, character };
+    return account;
   }
-  return { core, repository, sent, kicks, events, applied, player, register, ready, advance(ms) { now += ms; } };
+  return { core, repository, sent, kicks, events, released, player, register, ready, advance(ms) { now += ms; } };
 }
 
 test("PostgreSQL creates sequential numeric account IDs pending by default", async t => {
@@ -229,7 +226,7 @@ test("new credentials must be acknowledged before allowlist can release a sessio
   await f.repository.setAllowlist(account.userId, "approved", "console:test"); await f.core.tick();
   assert.equal(f.core.api.Users.get(1).status, "awaitingCredentialStorage");
   await f.core.credentialStored(1, { sessionId: account.sessionId });
-  assert.equal(f.core.api.Users.get(1).status, "selectingCharacter");
+  assert.equal(f.core.api.Users.get(1).status, "ready");
 });
 test("repeated credential acknowledgements are harmless", async t => {
   const f = await fixture(t), account = await f.register();
@@ -239,11 +236,29 @@ test("repeated credential acknowledgements are harmless", async t => {
 test("approval from another application is detected without reconnecting", async t => {
   const f = await fixture(t), account = await f.register();
   await bootstrap.pool.query("UPDATE ms_core.ms_users SET allowlist='approved' WHERE id=$1", [account.userId]);
-  await f.core.tick(); assert.equal(f.core.api.Users.get(1).status, "selectingCharacter");
-  const character = await f.core.api.Characters.create(1, { firstName: "Ana", lastName: "Silva", house: "Ravenclaw" });
-  await f.core.api.Characters.select(1, character.characterId);
-  assert.equal(f.core.api.Users.isReady(1), true);
+  await f.core.tick(); assert.equal(f.core.api.Users.isReady(1), true);
+  assert.deepEqual(f.released, [1]);
+  const ready = f.events.filter(e => e.name === "ms:playerReady");
+  assert.deepEqual(ready.map(e => e.payload), [{ playerId: 1, sessionId: account.sessionId, userId: account.userId }]);
+  await f.core.tick(); assert.equal(f.events.filter(e => e.name === "ms:playerReady").length, 1);
+});
+test("an approved account waits for the world to load before leaving quarantine", async t => {
+  const f = await fixture(t), account = await f.register(1, null, true, false);
+  await f.repository.setAllowlist(account.userId, "approved", "console:test"); await f.core.tick();
+  assert.equal(f.core.api.Users.get(1).status, "waitingForWorld");
+  assert.equal(f.events.some(e => e.name === "ms:playerReady"), false); assert.deepEqual(f.released, []);
+  assert.equal(f.events.filter(e => e.name === "ms:userAuthenticated").length, 1);
+  await f.core.loaded(1);
+  assert.equal(f.core.api.Users.isReady(1), true); assert.deepEqual(f.released, [1]);
   assert.equal(f.events.filter(e => e.name === "ms:playerReady").length, 1);
+});
+test("an account approved before connecting becomes ready right after the key check", async t => {
+  const f = await fixture(t), { userId } = await f.core.admit(connection(1));
+  await f.repository.setAllowlist(userId, "approved", "console:test");
+  await f.register(1);
+  assert.equal(f.core.api.Users.isReady(1), true);
+  assert.equal(f.sent.filter(v => v.name === "ms-core:session").at(-1).payload.status, "ready");
+  assert.equal("Characters" in f.core.api, false);
 });
 test("duplicate registration messages are coalesced into one account", async t => {
   const f = await fixture(t); await f.core.attach(f.player(1));
@@ -270,31 +285,10 @@ test("a delayed database registration cannot bind a replacement session", async 
   await assert.rejects(request, { code: "SESSION_EXPIRED" });
   assert.equal(f.core.api.Users.get(1).userId, null);
 });
-test("pending accounts cannot create characters or use administrative permissions", async t => {
+test("pending accounts cannot use administrative permissions", async t => {
   const f = await fixture(t); await f.register();
-  await assert.rejects(f.core.api.Characters.create(1, {}), { code: "INVALID_SESSION_STATE" });
+  assert.equal(f.core.api.Users.isReady(1), false);
   assert.equal(await f.core.api.Users.hasPermission(1, "allowlist.manage"), false);
-});
-test("character ownership and creation limits are enforced in PostgreSQL", async t => {
-  const f = await fixture(t), a = await f.ready(1), b = await f.register(2);
-  await f.repository.setAllowlist(b.userId, "approved", "console:test"); await f.core.tick();
-  await assert.rejects(f.core.api.Characters.select(2, a.character.characterId), { code: "CHARACTER_NOT_FOUND" });
-  await assert.rejects(f.repository.createCharacter(a.userId, { firstName: "Tom", lastName: "Riddle", house: "Slytherin" }, 1), { code: "CHARACTER_LIMIT" });
-});
-test("character state is stored with version checks and stale writes fail", async t => {
-  const f = await fixture(t), account = await f.ready();
-  const current = await f.repository.getCharacter(account.character.characterId);
-  await f.repository.saveCharacter(current.characterId, account.userId, current.version, { marker: 1 });
-  await assert.rejects(f.repository.saveCharacter(current.characterId, account.userId, current.version, { marker: 2 }), { code: "REVISION_CONFLICT" });
-  assert.equal((await f.repository.getCharacter(current.characterId)).state.marker, 1);
-});
-test("native restore failure never emits ready or saves partial data", async t => {
-  const f = await fixture(t, { async apply() { throw new Error("native failed"); } });
-  const account = await f.register(); await f.repository.setAllowlist(account.userId, "approved", "console:test"); await f.core.tick();
-  const character = await f.core.api.Characters.create(1, { firstName: "Ana", lastName: "Silva", house: "Ravenclaw" });
-  await assert.rejects(f.core.api.Characters.select(1, character.characterId));
-  assert.equal((await f.repository.getCharacter(character.characterId)).version, 0);
-  assert.equal(f.events.some(e => e.name === "ms:playerReady"), false);
 });
 test("readers cannot mutate the roles stored in memory", async t => {
   const f = await fixture(t); await f.ready();
@@ -347,7 +341,6 @@ test("database configuration has no SQLite or OAuth fallback", () => {
 });
 
 // Loading-screen admission (playerConnecting): numeric ID before entering the world.
-const connection = (id, extra = {}) => ({ nickname: "Player " + id, discordId: "discord-" + id, hardwareId: "machine-" + id, ip: "127.0.0.1", ...extra });
 test("the loading screen registers a pending account and returns its numeric ID without admitting it", async t => {
   const f = await fixture(t), first = await f.core.admit(connection(1));
   assert.deepEqual([first.allowed, first.userId, first.allowlist, first.created], [false, "1", "pending", true]);
@@ -370,7 +363,7 @@ test("only approved accounts enter, and the game client then claims a key for th
   assert.equal(admitted.allowed, true); assert.match(admitted.message, /ID: 1 aprovado/);
   const account = await f.register(1);
   assert.equal(account.userId, userId); assert.ok(account.credential);
-  assert.equal(f.core.api.Users.get(1).status, "selectingCharacter");
+  assert.equal(f.core.api.Users.get(1).status, "ready");
   assert.equal((await f.repository.listUsers()).length, 1);
   await f.core.attach({ ...f.player(3), discordId: "discord-1" });
   await assert.rejects(f.core.register(3, { sessionId: f.core.api.Users.get(3).sessionId, credential: null }), { code: "IDENTIFIER_ALREADY_REGISTERED" });

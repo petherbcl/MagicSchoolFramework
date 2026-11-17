@@ -32,8 +32,6 @@ function show(state) {
       pendingCredential = null;
       Events.emitServer("ms-core:credentialStored", payload);
     });
-    Web.on(view, "createCharacter", payload => Events.emitServer("ms-core:createCharacter", payload));
-    Web.on(view, "selectCharacter", payload => Events.emitServer("ms-core:selectCharacter", payload));
   }
   flush();
 }
