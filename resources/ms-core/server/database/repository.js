@@ -64,10 +64,7 @@ class Repository {
       }
       // The unique index resolves competing registrations, including across processes.
       // Any conflict rolls back the user, credential, role and audit together.
-      for (const [kind, value] of values.sort(([a], [b]) => a.localeCompare(b))) {
-        await db.query(`INSERT INTO ms_core.ms_connection_identifiers(user_id,kind,value) VALUES($1,$2,$3)
-          ON CONFLICT(user_id,kind,value) DO UPDATE SET last_seen_at=now()`, [id, kind, value]);
-      }
+      await this.bindIdentifiers(db, id, values);
       return this.getUser(id, db);
     });
   }
@@ -77,6 +74,34 @@ class Repository {
     return (await db.query(`SELECT DISTINCT user_id FROM ms_core.ms_connection_identifiers
       WHERE (kind,value) IN (SELECT * FROM unnest($1::text[],$2::text[])) ORDER BY user_id`,
     [unique.map(([kind]) => kind), unique.map(([, value]) => value)])).rows.map(row => String(row.user_id));
+  }
+  // Account identifiers (Steam/Epic/Discord/hardware): only kinds the account does not have
+  // yet are added; a different value of an existing kind is ignored, never a second ID.
+  // IP, nickname and Discord name keep one row per kind, updated to the latest value.
+  async bindIdentifiers(db, id, values) {
+    await db.query("SELECT id FROM ms_core.ms_users WHERE id=$1 FOR UPDATE", [id]);
+    const known = (await db.query("SELECT kind,value FROM ms_core.ms_connection_identifiers WHERE user_id=$1 ORDER BY last_seen_at DESC", [id])).rows;
+    const added = [], ignored = [], updated = [];
+    for (const [kind, value] of [...values].sort(([a], [b]) => a.localeCompare(b))) {
+      const unique = UNIQUE_IDENTIFIERS.includes(kind), rows = known.filter(row => row.kind === kind);
+      // Another account's ID is always refused, even when it would be ignored here.
+      if (unique) check(!(await db.query("SELECT 1 FROM ms_core.ms_connection_identifiers WHERE kind=$1 AND value=$2 AND user_id<>$3", [kind, value, id])).rowCount, "IDENTIFIER_ALREADY_REGISTERED");
+      if (!rows.length) {
+        await db.query("INSERT INTO ms_core.ms_connection_identifiers(user_id,kind,value) VALUES($1,$2,$3)", [id, kind, value]);
+        added.push(kind); continue;
+      }
+      if (unique) {
+        if (rows.some(row => row.value === value)) await db.query("UPDATE ms_core.ms_connection_identifiers SET last_seen_at=now() WHERE user_id=$1 AND kind=$2 AND value=$3", [id, kind, value]);
+        else ignored.push(kind);
+        continue;
+      }
+      // Keep a single row: the matching one, or the most recent one rewritten to the new value.
+      const keep = rows.find(row => row.value === value) || rows[0];
+      await db.query("DELETE FROM ms_core.ms_connection_identifiers WHERE user_id=$1 AND kind=$2 AND value<>$3", [id, kind, keep.value]);
+      await db.query("UPDATE ms_core.ms_connection_identifiers SET value=$4,last_seen_at=now() WHERE user_id=$1 AND kind=$2 AND value=$3", [id, kind, keep.value, value]);
+      if (keep.value !== value) updated.push(kind);
+    }
+    return { added, ignored, updated };
   }
   async createUser(db) {
     const id = String((await db.query("INSERT INTO ms_core.ms_users DEFAULT VALUES RETURNING id")).rows[0].id);
@@ -96,15 +121,15 @@ class Repository {
           check(owners.length <= 1, "IDENTIFIER_CONFLICT");
           let id = owners[0], created = false;
           if (id) {
-            // Matching only refreshes what already belongs to the account; new device IDs
-            // are bound later, once the in-game key check passes.
+            // Refresh known identifiers and bind newly announced ones to the matched account.
+            // Unique IDs owned by another account were excluded above (IDENTIFIER_CONFLICT);
+            // a concurrent claim hits the unique index and is retried once.
             await db.query("UPDATE ms_core.ms_users SET last_seen_at=now() WHERE id=$1", [id]);
-            for (const [kind, value] of values) await db.query("UPDATE ms_core.ms_connection_identifiers SET last_seen_at=now() WHERE user_id=$1 AND kind=$2 AND value=$3", [id, kind, value]);
+            const { added, ignored } = await this.bindIdentifiers(db, id, values);
+            if (added.length || ignored.length) await this.audit(db, "registration", "identifiers.added", id, { kinds: added, ignored });
           } else {
             id = await this.createUser(db); created = true;
-            for (const [kind, value] of values.sort(([a], [b]) => a.localeCompare(b))) {
-              await db.query("INSERT INTO ms_core.ms_connection_identifiers(user_id,kind,value) VALUES($1,$2,$3)", [id, kind, value]);
-            }
+            await this.bindIdentifiers(db, id, values);
           }
           return { ...(await this.getUser(id, db)), created };
         });

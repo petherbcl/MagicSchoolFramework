@@ -20,6 +20,17 @@ function integer(env, key, fallback, min, max) {
   if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Invalid ${key}`);
   return value;
 }
+function parseRequired(value) {
+  const groups = new Map();
+  for (const part of String(value || "").split(",")) {
+    if (!part.trim()) continue;
+    const kinds = [...new Set(part.split("|").map(kind => kind.trim()))];
+    for (const kind of kinds) if (!UNIQUE_IDENTIFIERS.includes(kind)) throw new Error("Invalid MS_REQUIRED_IDENTIFIERS: " + (kind || part.trim()));
+    const key = [...kinds].sort().join("|");
+    if (!groups.has(key)) groups.set(key, Object.freeze(kinds));
+  }
+  return [...groups.values()];
+}
 function loadConfig(env = process.env, options = {}) {
   // Explicit test environments stay isolated unless a file is requested.
   const envFile = options.envFile !== undefined ? options.envFile :
@@ -37,8 +48,9 @@ function loadConfig(env = process.env, options = {}) {
     formUrl = url.href;
   }
   // Comma-separated account identifiers that every connection must announce (e.g. "discordId,steamId").
-  const requiredIdentifiers = Object.freeze([...new Set(String(env.MS_REQUIRED_IDENTIFIERS || "").split(",").map(v => v.trim()).filter(Boolean))]);
-  for (const kind of requiredIdentifiers) if (!UNIQUE_IDENTIFIERS.includes(kind)) throw new Error("Invalid MS_REQUIRED_IDENTIFIERS: " + kind);
+  // "," means AND, "|" means OR within a group: "discordId,steamId|epicId" = Discord AND (Steam OR Epic).
+  // Parsed into groups; each group needs at least one of its identifiers.
+  const requiredIdentifiers = Object.freeze(parseRequired(env.MS_REQUIRED_IDENTIFIERS));
   return Object.freeze({
     databaseUrl, databaseConfigured: Boolean(databaseUrl), serverKey, formUrl, requiredIdentifiers,
     poolSize: integer(env, "MS_DATABASE_POOL_SIZE", 5, 1, 20), queryTimeoutMs: 10000,

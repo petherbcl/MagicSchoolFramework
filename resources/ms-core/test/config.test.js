@@ -45,7 +45,9 @@ test("explicit test environments do not import the operator's real env file", ()
 });
 test("required identifiers are parsed, deduplicated and validated", () => {
   assert.deepEqual(loadConfig({}).requiredIdentifiers, []);
-  assert.deepEqual(loadConfig({ MS_REQUIRED_IDENTIFIERS: " discordId, steamId,discordId " }).requiredIdentifiers, ["discordId", "steamId"]);
+  assert.deepEqual(loadConfig({ MS_REQUIRED_IDENTIFIERS: " discordId, steamId,discordId " }).requiredIdentifiers, [["discordId"], ["steamId"]]);
+  assert.deepEqual(loadConfig({ MS_REQUIRED_IDENTIFIERS: "discordId,steamId | epicId,epicId|steamId" }).requiredIdentifiers, [["discordId"], ["steamId", "epicId"]]);
+  assert.throws(() => loadConfig({ MS_REQUIRED_IDENTIFIERS: "steamId||epicId" }), /MS_REQUIRED_IDENTIFIERS/);
   assert.throws(() => loadConfig({ MS_REQUIRED_IDENTIFIERS: "discordName" }), /MS_REQUIRED_IDENTIFIERS/);
   assert.throws(() => loadConfig({ MS_REQUIRED_IDENTIFIERS: "ip" }), /MS_REQUIRED_IDENTIFIERS/);
 });

@@ -425,7 +425,7 @@ test("recovery accepts a loading-screen account that never received a key", asyn
 test("required identifiers are explained on the loading screen before any account is created", async t => {
   const repository = new Repository(config), kicks = [];
   const game = { restrict() {}, release() {}, cancel() {}, send() {}, kick(p, reason) { kicks.push(reason); } };
-  const core = createCore({ repository, config: { ...config, requiredIdentifiers: ["discordId", "steamId"] }, game, logger: { error() {} } });
+  const core = createCore({ repository, config: { ...config, requiredIdentifiers: [["discordId"], ["steamId"]] }, game, logger: { error() {} } });
   t.after(async () => { await core.stop(); await repository.close(); });
   const missing = await core.admit(connection(1, { steamId: "steam-1", discordId: "" }));
   assert.equal(missing.allowed, false); assert.equal(missing.userId, null);
@@ -438,4 +438,61 @@ test("required identifiers are explained on the loading screen before any accoun
   await assert.rejects(core.register(2, { sessionId: core.api.Users.get(2).sessionId, credential: null }), { code: "IDENTIFIER_MISSING" });
   assert.match(kicks.at(-1), /Steam: inicia o jogo pela Steam/); assert.equal(core.api.Users.get(2), null);
   assert.equal((await repository.listUsers()).length, 1);
+});
+test("required identifier groups accept any platform inside an OR group", async t => {
+  const repository = new Repository(config);
+  const core = createCore({ repository, config: { ...config, requiredIdentifiers: [["discordId"], ["steamId", "epicId"]] }, game: {}, logger: { error() {} } });
+  t.after(async () => { await core.stop(); await repository.close(); });
+  const none = await core.admit(connection(1));
+  assert.equal(none.allowed, false);
+  assert.match(none.message, /exige: Steam ou Epic Games: inicia o jogo pela Steam.*; ou inicia o jogo pela Epic/); assert.doesNotMatch(none.message, /Discord/);
+  assert.equal((await core.admit(connection(1, { epicId: "epic-1" }))).userId, "1");
+  assert.equal((await core.admit(connection(2, { steamId: "steam-2" }))).userId, "2");
+  assert.match((await core.admit(connection(3, { steamId: "steam-3", discordId: "" }))).message, /exige: Discord: abre/);
+});
+test("the loading screen binds newly announced identifiers to the matched account", async t => {
+  const f = await fixture(t), { userId } = await f.core.admit(connection(1));
+  const again = await f.core.admit(connection(1, { steamId: "steam-1", nickname: "Novo nome" }));
+  assert.equal(again.userId, userId); assert.equal(again.created, false);
+  const rows = (await f.repository.pool.query("SELECT kind,value FROM ms_core.ms_connection_identifiers WHERE user_id=$1 ORDER BY kind,value", [userId])).rows;
+  assert.ok(rows.some(r => r.kind === "steamId" && r.value === "steam-1"));
+  assert.deepEqual(rows.filter(r => r.kind === "nickname").map(r => r.value), ["Novo nome"]);
+  assert.equal(rows.filter(r => r.kind === "discordId").length, 1);
+  const audit = (await f.repository.pool.query("SELECT details FROM ms_core.ms_audit_log WHERE action='identifiers.added'")).rows;
+  assert.deepEqual(audit.map(r => r.details.kinds), [["steamId"]]);
+  await f.core.admit(connection(1, { steamId: "steam-1", nickname: "Novo nome" }));
+  assert.equal((await f.repository.pool.query("SELECT 1 FROM ms_core.ms_audit_log WHERE action='identifiers.added'")).rowCount, 1);
+  // The new Steam ID now identifies the same account on its own.
+  assert.equal((await f.core.admit({ steamId: "steam-1" })).userId, userId);
+  await f.core.admit(connection(2));
+  await assert.rejects(f.core.admit(connection(2, { steamId: "steam-1" })), { code: "IDENTIFIER_CONFLICT" });
+  assert.equal((await f.repository.pool.query("SELECT 1 FROM ms_core.ms_connection_identifiers WHERE value='steam-1'")).rowCount, 1);
+});
+test("an account identifier that already exists never gains a second value", async t => {
+  const f = await fixture(t), { userId } = await f.core.admit(connection(1));
+  const result = await f.core.admit(connection(1, { discordId: "discord-novo", steamId: "steam-1" }));
+  assert.equal(result.userId, userId);
+  const rows = (await f.repository.pool.query("SELECT kind,value FROM ms_core.ms_connection_identifiers WHERE user_id=$1 ORDER BY kind,value", [userId])).rows;
+  assert.deepEqual(rows.filter(r => r.kind === "discordId").map(r => r.value), ["discord-1"]);
+  assert.deepEqual(rows.filter(r => r.kind === "steamId").map(r => r.value), ["steam-1"]);
+  const audit = (await f.repository.pool.query("SELECT details FROM ms_core.ms_audit_log WHERE action='identifiers.added'")).rows;
+  assert.deepEqual(audit.at(-1).details, { kinds: ["steamId"], ignored: ["discordId"] });
+  assert.equal((await f.repository.pool.query("SELECT 1 FROM ms_core.ms_connection_identifiers WHERE value='discord-novo'")).rowCount, 0);
+  // The in-game key path follows the same rule.
+  const account = await f.register(1);
+  await f.core.disconnect(1);
+  await f.register(2, account.credential);
+  assert.deepEqual((await f.repository.pool.query("SELECT value FROM ms_core.ms_connection_identifiers WHERE user_id=$1 AND kind IN ('discordId','hardwareId') ORDER BY value", [userId])).rows.map(r => r.value), ["discord-1", "machine-1"]);
+});
+test("IP, nickname and Discord name keep one row per kind updated to the latest value", async t => {
+  const f = await fixture(t), { userId } = await f.core.admit(connection(1, { discordName: "ana" }));
+  const kinds = async () => (await f.repository.pool.query("SELECT kind,value FROM ms_core.ms_connection_identifiers WHERE user_id=$1 AND kind IN ('ip','nickname','discordName') ORDER BY kind", [userId])).rows;
+  // Legacy history rows converge to a single row.
+  await f.repository.pool.query("INSERT INTO ms_core.ms_connection_identifiers(user_id,kind,value,last_seen_at) VALUES($1,'ip','10.0.0.9','2020-01-01')", [userId]);
+  await f.core.admit(connection(1, { ip: "10.0.0.2", nickname: "Ana Silva", discordName: "ana" }));
+  assert.deepEqual(await kinds(), [{ kind: "discordName", value: "ana" }, { kind: "ip", value: "10.0.0.2" }, { kind: "nickname", value: "Ana Silva" }]);
+  const account = await f.register(1); await f.core.disconnect(1);
+  await f.register(2, account.credential);
+  assert.deepEqual((await kinds()).map(r => r.value), ["ana", "10.0.0.2", "Player 2"]);
+  assert.equal((await f.repository.pool.query("SELECT 1 FROM ms_core.ms_audit_log WHERE action='identifiers.added'")).rowCount, 0);
 });

@@ -159,16 +159,18 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     catch (error) { if (current(s)) await detach(s, "accessCheckFailed", "Não foi possível verificar o acesso."); throw error; }
   }
   const identifierHelp = {
-    discordId: "Discord: abre a aplicação do Discord no PC (com sessão iniciada) antes de ligar.",
-    steamId: "Steam: inicia o jogo pela Steam, com a Steam aberta e com sessão iniciada.",
-    epicId: "Epic Games: inicia o jogo pela Epic Games Launcher, com sessão iniciada.",
-    hardwareId: "Identificador de hardware: não foi possível obtê-lo; contacta a equipa.",
+    discordId: ["Discord", "abre a aplicação do Discord no PC (com sessão iniciada) antes de ligar"],
+    steamId: ["Steam", "inicia o jogo pela Steam, com a Steam aberta e com sessão iniciada"],
+    epicId: ["Epic Games", "inicia o jogo pela Epic Games Launcher, com sessão iniciada"],
+    hardwareId: ["Identificador de hardware", "não foi possível obtê-lo; contacta a equipa"],
   };
-  // Returns the pt-PT explanation for required identifiers the client did not announce, or "".
+  // Returns the pt-PT explanation for required identifier groups (AND of ORs) not satisfied, or "".
   function missingIdentifiers(source) {
     const announced = observed(source);
-    const missing = (config.requiredIdentifiers || []).filter(kind => !announced[kind]);
-    return missing.length ? "Este servidor exige: " + missing.map(kind => identifierHelp[kind]).join(" ") + " Depois volta a ligar." : "";
+    const missing = (config.requiredIdentifiers || []).filter(group => !group.some(kind => announced[kind]));
+    return missing.length ? "Este servidor exige: " + missing.map(group =>
+      group.map(kind => identifierHelp[kind][0]).join(" ou ") + ": " + group.map(kind => identifierHelp[kind][1]).join("; ou ") + ".").join(" ") +
+      " Depois volta a ligar." : "";
   }
   // Runs during the native handshake (loading screen), before any Player exists.
   // Only approved accounts are admitted; everyone else leaves with their numeric ID.
