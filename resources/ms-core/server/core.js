@@ -114,6 +114,8 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     check(input && input.sessionId === s.sessionId, "SESSION_EXPIRED");
     if (s.registration) return s.registration;
     check(s.status === "identifying", "INVALID_SESSION_STATE");
+    const missing = missingIdentifiers(s.observed);
+    if (missing) { s.registration = detach(s, "identifierMissing", missing).then(() => { throw new CoreError("IDENTIFIER_MISSING"); }); return s.registration; }
     let credential = input.credential;
     check(credential === null || (typeof credential === "string" && /^[A-Za-z0-9_-]{43}$/.test(credential)), "INVALID_CREDENTIAL");
     s.status = "registering";
@@ -156,11 +158,25 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     try { await evaluate(s); }
     catch (error) { if (current(s)) await detach(s, "accessCheckFailed", "Não foi possível verificar o acesso."); throw error; }
   }
+  const identifierHelp = {
+    discordId: "Discord: abre a aplicação do Discord no PC (com sessão iniciada) antes de ligar.",
+    steamId: "Steam: inicia o jogo pela Steam, com a Steam aberta e com sessão iniciada.",
+    epicId: "Epic Games: inicia o jogo pela Epic Games Launcher, com sessão iniciada.",
+    hardwareId: "Identificador de hardware: não foi possível obtê-lo; contacta a equipa.",
+  };
+  // Returns the pt-PT explanation for required identifiers the client did not announce, or "".
+  function missingIdentifiers(source) {
+    const announced = observed(source);
+    const missing = (config.requiredIdentifiers || []).filter(kind => !announced[kind]);
+    return missing.length ? "Este servidor exige: " + missing.map(kind => identifierHelp[kind]).join(" ") + " Depois volta a ligar." : "";
+  }
   // Runs during the native handshake (loading screen), before any Player exists.
   // Only approved accounts are admitted; everyone else leaves with their numeric ID.
   async function admit(connection) {
     check(!closing, "CORE_STOPPING");
     check(sessions.size < config.maxSessions, "SESSION_LIMIT");
+    const missing = missingIdentifiers(connection);
+    if (missing) return { allowed: false, userId: null, allowlist: null, created: false, missing: true, message: missing };
     const user = await repository.admission(observed(connection));
     const ban = await repository.activeBan(user.userId);
     const id = "ID: " + user.userId;

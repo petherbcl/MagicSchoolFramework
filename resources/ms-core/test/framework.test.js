@@ -351,7 +351,7 @@ const connection = (id, extra = {}) => ({ nickname: "Player " + id, discordId: "
 test("the loading screen registers a pending account and returns its numeric ID without admitting it", async t => {
   const f = await fixture(t), first = await f.core.admit(connection(1));
   assert.deepEqual([first.allowed, first.userId, first.allowlist, first.created], [false, "1", "pending", true]);
-  assert.match(first.message, /Registo n\.º 1 criado\. Aguarda aprovação/);
+  assert.match(first.message, /ID: 1 criado\. Aguarda aprovação/);
   const again = await f.core.admit(connection(1));
   assert.deepEqual([again.allowed, again.userId, again.created], [false, "1", false]);
   assert.equal((await f.repository.listUsers()).length, 1);
@@ -367,7 +367,7 @@ test("only approved accounts enter, and the game client then claims a key for th
   const f = await fixture(t), { userId } = await f.core.admit(connection(1));
   await f.repository.setAllowlist(userId, "approved", "console:test");
   const admitted = await f.core.admit(connection(1));
-  assert.equal(admitted.allowed, true); assert.match(admitted.message, /Registo n\.º 1 aprovado/);
+  assert.equal(admitted.allowed, true); assert.match(admitted.message, /ID: 1 aprovado/);
   const account = await f.register(1);
   assert.equal(account.userId, userId); assert.ok(account.credential);
   assert.equal(f.core.api.Users.get(1).status, "selectingCharacter");
@@ -392,14 +392,14 @@ test("reset-key lets the next client with the account identifiers claim a new ke
 });
 test("the loading screen rejects denied, banned and already-online accounts with their ID", async t => {
   const f = await fixture(t), online = await f.ready(1);
-  assert.match((await f.core.admit(connection(1))).message, /Registo n\.º 1: esta conta já está ligada/);
+  assert.match((await f.core.admit(connection(1))).message, /ID: 1: esta conta já está ligada/);
   const { userId } = await f.core.admit(connection(2));
   await f.repository.setAllowlist(userId, "denied", "console:test");
   const denied = await f.core.admit(connection(2));
-  assert.equal(denied.allowed, false); assert.match(denied.message, /Registo n\.º 2: o pedido de allowlist foi recusado/);
+  assert.equal(denied.allowed, false); assert.match(denied.message, /ID: 2: o pedido de allowlist foi recusado/);
   await f.core.disconnect(1); await f.repository.ban(online.userId, "Teste", null, "console:test");
   const banned = await f.core.admit(connection(1));
-  assert.equal(banned.allowed, false); assert.match(banned.message, /Registo n\.º 1 bloqueado: Teste/);
+  assert.equal(banned.allowed, false); assert.match(banned.message, /ID: 1 bloqueado: Teste/);
 });
 test("the loading screen requires an account identifier and refuses ambiguous owners", async t => {
   const f = await fixture(t);
@@ -421,4 +421,21 @@ test("recovery accepts a loading-screen account that never received a key", asyn
   await f.repository.recoverCredential(userId, original.userId, "console:test");
   const claimed = await f.register(2);
   assert.equal(claimed.userId, original.userId);
+});
+test("required identifiers are explained on the loading screen before any account is created", async t => {
+  const repository = new Repository(config), kicks = [];
+  const game = { restrict() {}, release() {}, cancel() {}, send() {}, kick(p, reason) { kicks.push(reason); } };
+  const core = createCore({ repository, config: { ...config, requiredIdentifiers: ["discordId", "steamId"] }, game, logger: { error() {} } });
+  t.after(async () => { await core.stop(); await repository.close(); });
+  const missing = await core.admit(connection(1, { steamId: "steam-1", discordId: "" }));
+  assert.equal(missing.allowed, false); assert.equal(missing.userId, null);
+  assert.match(missing.message, /exige: Discord: abre a aplicação do Discord/); assert.doesNotMatch(missing.message, /Steam/);
+  assert.match((await core.admit(connection(1, { discordId: "" }))).message, /Discord.*Steam/);
+  assert.equal((await repository.listUsers()).length, 0);
+  assert.equal((await core.admit(connection(1, { steamId: "steam-1" }))).userId, "1");
+  // Players attached without a handshake (resource restart) are checked at in-game registration.
+  await core.attach({ id: 2, connected: true, discordId: "discord-2" });
+  await assert.rejects(core.register(2, { sessionId: core.api.Users.get(2).sessionId, credential: null }), { code: "IDENTIFIER_MISSING" });
+  assert.match(kicks.at(-1), /Steam: inicia o jogo pela Steam/); assert.equal(core.api.Users.get(2), null);
+  assert.equal((await repository.listUsers()).length, 1);
 });

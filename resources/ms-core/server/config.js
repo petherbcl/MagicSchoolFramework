@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { parseEnv } = require("node:util");
+const { UNIQUE_IDENTIFIERS } = require("./validation");
 
 function readEnvFile(filename) {
   if (!filename) return {};
@@ -35,8 +36,11 @@ function loadConfig(env = process.env, options = {}) {
     if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) throw new Error("Invalid MS_ALLOWLIST_FORM_URL");
     formUrl = url.href;
   }
+  // Comma-separated account identifiers that every connection must announce (e.g. "discordId,steamId").
+  const requiredIdentifiers = Object.freeze([...new Set(String(env.MS_REQUIRED_IDENTIFIERS || "").split(",").map(v => v.trim()).filter(Boolean))]);
+  for (const kind of requiredIdentifiers) if (!UNIQUE_IDENTIFIERS.includes(kind)) throw new Error("Invalid MS_REQUIRED_IDENTIFIERS: " + kind);
   return Object.freeze({
-    databaseUrl, databaseConfigured: Boolean(databaseUrl), serverKey, formUrl,
+    databaseUrl, databaseConfigured: Boolean(databaseUrl), serverKey, formUrl, requiredIdentifiers,
     poolSize: integer(env, "MS_DATABASE_POOL_SIZE", 5, 1, 20), queryTimeoutMs: 10000,
     approvalTimeoutMs: integer(env, "MS_APPROVAL_TIMEOUT_SECONDS", 1800, 60, 86400) * 1000,
     accessPollMs: integer(env, "MS_ACCESS_POLL_SECONDS", 5, 1, 60) * 1000,

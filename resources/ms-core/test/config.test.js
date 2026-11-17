@@ -43,3 +43,9 @@ test("a missing env file falls back to the supplied environment", t => {
 test("explicit test environments do not import the operator's real env file", () => {
   assert.equal(loadConfig({}).databaseConfigured, false);
 });
+test("required identifiers are parsed, deduplicated and validated", () => {
+  assert.deepEqual(loadConfig({}).requiredIdentifiers, []);
+  assert.deepEqual(loadConfig({ MS_REQUIRED_IDENTIFIERS: " discordId, steamId,discordId " }).requiredIdentifiers, ["discordId", "steamId"]);
+  assert.throws(() => loadConfig({ MS_REQUIRED_IDENTIFIERS: "discordName" }), /MS_REQUIRED_IDENTIFIERS/);
+  assert.throws(() => loadConfig({ MS_REQUIRED_IDENTIFIERS: "ip" }), /MS_REQUIRED_IDENTIFIERS/);
+});
