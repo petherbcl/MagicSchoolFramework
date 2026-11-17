@@ -19,7 +19,6 @@ Para isso, o projeto não é só um gamemode: é uma **framework própria**, pen
 | --- | --- |
 | [ms-core](resources/ms-core/README.md) | Framework base: contas, IDs de registo, allowlist, chave local, roles, permissões e bans |
 | [ms-character](resources/ms-character/README.md) | Lobby de personagens: criação, seleção e persistência (inventário, look, casa, posição) |
-| [my-gamemode](resources/my-gamemode) | Gamemode mínimo de exemplo, com o padrão a seguir pelos recursos de gameplay |
 
 Fluxo de um jogador: **ligação → allowlist e chave local (ms-core) → lobby de personagens (ms-character) → jogo (`ms:characterReady`)**.
 
@@ -35,12 +34,6 @@ npm.cmd ci --prefix resources/ms-core
 ```
 
 O servidor escuta na porta **27016** (ver `server.json`). Os clientes ligam-se a `127.0.0.1:27016`.
-
-## Documentação
-
-- [docs/MS_CORE.md](docs/MS_CORE.md): especificação do ms-core (fluxo, esquema, SQL para a aplicação do formulário, API).
-- [docs/FRAMEWORK_INICIAL_ARCANEMP.md](docs/FRAMEWORK_INICIAL_ARCANEMP.md): proposta original da framework.
-- [docs/arcane-mp/](docs/arcane-mp/): referência da API ArcaneMP.
 
 ## Licença
 
