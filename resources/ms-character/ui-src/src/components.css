@@ -250,10 +250,11 @@ kbd, .keycap {
 
 .choice-group--crests { grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); }
 .choice--crest {
+  overflow-wrap: anywhere; hyphens: auto;
   flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-2) var(--space-3);
   font: var(--font-size-sm) / 1.25 var(--font-family-body); letter-spacing: 0; text-transform: none; text-align: center;
 }
-.choice--crest svg { width: 2.75rem; height: auto; }
+.choice--crest svg, .choice--crest img { width: 2.75rem; height: auto; }
 .choice--crest .choice__mark { position: absolute; top: var(--space-2); right: var(--space-2); }
 
 /* --------------------------------------------------------------------------
@@ -308,6 +309,7 @@ kbd, .keycap {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile-min, 4rem), 1fr));
   gap: var(--space-3); max-width: 42rem; margin: 0; padding: var(--space-1);
 }
+@media (min-width: 1600px) { .option-grid { max-width: none; } }
 .tile {
   position: relative; aspect-ratio: 1; min-width: var(--target-min); padding: 0;
   display: grid; place-items: center;
@@ -346,6 +348,15 @@ kbd, .keycap {
 .tile[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; transform: none; }
 .tile[aria-disabled="true"]::after { opacity: 0; }
 .tile--none svg { width: 1.5rem; height: 1.5rem; }
+/* Thumbnail tiles (UI_Refs/criacao): larger tiles, the image fills them, the number sits in a corner. */
+.option-grid--images { --tile-min: 5.5rem; }
+.option-grid--tall .tile { aspect-ratio: 1 / 1.6; }
+.tile > img { position: absolute; inset: 3px; width: calc(100% - 6px); height: calc(100% - 6px); object-fit: contain; pointer-events: none; }
+.tile__num {
+  position: absolute; left: 6px; bottom: 3px; font: var(--font-weight-semibold) var(--font-size-xs) / 1 var(--font-family-display);
+  color: var(--color-text-secondary); text-shadow: 0 1px 2px #000;
+}
+.tile[aria-selected="true"] .tile__num { color: var(--color-text-primary); }
 
 /* --------------------------------------------------------------------------
    STEP SLIDER (arrows + dots + marker)
@@ -432,7 +443,7 @@ kbd, .keycap {
   --vignette-panel-edge: 0.92;
   --vignette-feather: 0.5;
   --vignette-feather-width: 6rem;
-  --vignette-fade-width: 18rem;
+  --vignette-fade-width: min(18rem, 12vw);
   --vignette-edge: 0.7;
   --vignette-ellipse: 34% 62%;
   --vignette-center-y: 46%;
@@ -530,7 +541,7 @@ kbd, .keycap {
 .char-card.is-loading { border-color: var(--color-accent-primary); }
 .char-card.is-loading::after { opacity: 1; }
 .char-card__crest { display: block; width: 3rem; }
-.char-card__crest svg { display: block; width: 100%; height: auto; }
+.char-card__crest svg, .char-card__crest img { display: block; width: 100%; height: auto; }
 .char-card__name {
   margin: 0;
   font: var(--font-weight-semibold) var(--font-size-xl) / 1.2 var(--font-family-display);
@@ -540,6 +551,11 @@ kbd, .keycap {
 .char-card__date { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
 .char-card__actions { display: flex; align-items: center; gap: var(--space-2); }
 .char-card__actions .btn--primary { min-width: 9rem; }
+.char-card > div:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 1400px) { /* narrow panel: the actions go to their own row so a long name keeps its width */
+  .char-card { grid-template-columns: auto 1fr; }
+  .char-card__actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
 .badge {
   display: inline-flex; align-items: center; gap: var(--space-1);
   padding: 0.125rem var(--space-2);
@@ -576,7 +592,7 @@ kbd, .keycap {
   display: grid; place-items: center; padding: var(--space-8);
 }
 .dialog {
-  width: min(30rem, 100%); padding: var(--space-8) var(--space-8) var(--space-6);
+  width: min(34rem, 100%); padding: var(--space-8) var(--space-8) var(--space-6);
   background: linear-gradient(180deg, #16242F, var(--color-bg-surface));
   border: 1px solid var(--color-brass); border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
   animation: ms-dialog-in var(--duration-normal) var(--ease-smooth-out);
@@ -588,7 +604,7 @@ kbd, .keycap {
 }
 .dialog__body { margin: 0; text-align: center; font-size: 1.0625rem; }
 .dialog__body strong { color: var(--color-accent-primary-hover); font-weight: var(--font-weight-bold); }
-.dialog__actions { display: flex; justify-content: center; gap: var(--space-4); margin-top: var(--space-6); }
+.dialog__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-4); margin-top: var(--space-6); }
 .dialog__actions .btn { min-width: 9.5rem; }
 .is-closing .scrim { animation: ms-fade-out var(--duration-fast) var(--ease-smooth-in) forwards; }
 .is-closing .dialog { animation: ms-dialog-out var(--duration-fast) var(--ease-smooth-in) forwards; }
@@ -726,12 +742,15 @@ kbd, .keycap {
 .cta[aria-busy="true"] .btn__busy { visibility: visible; }
 .cta .spinner { width: 1.4rem; height: 1.4rem; }
 
+@media (max-width: 1400px), (max-height: 800px) {
+  :root { --tab-size: 3rem; }
+  .tabs { gap: var(--space-2); padding-left: 0.75rem; padding-right: 0.75rem; } /* 7 tabs of 48 px fit the 1280x720 panel */
+}
 @media (max-height: 800px) {
   .panel { padding-top: var(--space-5); padding-bottom: var(--space-4); }
   .panel-title { font-size: 1.625rem; }
   .tabbar { margin-top: var(--space-3); }
-  .tabs { gap: var(--space-2); padding-left: 0; padding-right: 0; } /* 7 tabs of 48 px fit the 1280x720 panel */
-  :root { --tab-size: 3rem; --tile-min: 3.5rem; }
+  :root { --tile-min: 3.5rem; }
   .cta { min-height: 3.75rem; }
 }
 @media (prefers-reduced-motion: reduce) {

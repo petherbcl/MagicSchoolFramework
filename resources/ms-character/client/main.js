@@ -7,6 +7,7 @@
 const PREVIEW_DEBOUNCE_MS = 80;
 const SCHEMA_POLL_MS = 50;
 const COMMIT_REPLY_TIMEOUT_MS = 150;
+const BODY_SCHEMA_FALLBACK_MS = 250;
 const SCHEMA_TIMEOUT_MS = 2000;
 const REFERENCE_WIDTH = 1920;
 
@@ -24,7 +25,7 @@ let cameraTouched = false, frozen = false;
 let creatorOpen = false;      // the page is in the creator (as opposed to the lobby preview)
 let pronoun = null;           // chosen pronoun, applied to the exported look on create
 let pendingPatch = null, patchTimer = null;
-let schemaTimer = null, schemaToken = 0;
+let schemaTimer = null, schemaToken = 0, bodyAwait = false;
 
 function attempt(label, fn) {
   try { return fn(); } catch (error) {
@@ -74,7 +75,7 @@ function expectCommitReply(result) {
 function clearTimers() {
   commitTimer = cancelTimer(commitTimer); commitPending = 0;
   patchTimer = cancelTimer(patchTimer); pendingPatch = null;
-  schemaTimer = cancelTimer(schemaTimer); schemaToken++;
+  schemaTimer = cancelTimer(schemaTimer); schemaToken++; bodyAwait = false;
 }
 
 // Idempotent. Only touches what this resource acquired.
@@ -146,7 +147,7 @@ function deliverSchema(force) {
 }
 
 function failCreator(code) {
-  schemaTimer = cancelTimer(schemaTimer); schemaToken++;
+  schemaTimer = cancelTimer(schemaTimer); schemaToken++; bodyAwait = false;
   creatorOpen = false;
   sendToPage("creator:error", { code });
 }
@@ -222,8 +223,16 @@ function onBody(payload) {
   // A queued preview was made against the old body's IDs.
   patchTimer = cancelTimer(patchTimer); pendingPatch = null;
   applyPatchNow("preset", payload.preset);
-  // The schema IDs change with the body: resend it once getSchema() agrees with getState().
-  sendSchemaWhenReady(true);
+  // The game applies the patch a few ms later: wait for its creatorChanged (or a short fallback) before reading the
+  // new schema, otherwise the old body's schema and state still agree with each other and would be sent again.
+  bodyAwait = true;
+  schemaTimer = cancelTimer(schemaTimer);
+  const token = ++schemaToken, sessionId = session.id;
+  schemaTimer = setTimeout(() => {
+    schemaTimer = null;
+    if (token !== schemaToken || !bodyAwait || session === null || session.id !== sessionId) return;
+    bodyAwait = false; sendSchemaWhenReady(true);
+  }, BODY_SCHEMA_FALLBACK_MS);
 }
 
 function onPronoun(payload) {
@@ -291,6 +300,11 @@ function show(state) {
 
 Events.on("creatorChanged", state => {
   if (session === null || !creatorOpen) return;
+  if (bodyAwait && state && state.change && state.change.category === "preset") {
+    bodyAwait = false; schemaTimer = cancelTimer(schemaTimer);
+    sendSchemaWhenReady(true);
+    return;
+  }
   if (schemaTimer !== null) return; // sendSchemaWhenReady is still polling; it sends the state with the schema
   sendToPage("creator:state", state);
   if (commitPending > 0 && state && state.change) {

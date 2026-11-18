@@ -29,7 +29,7 @@ export const CATEGORIES = Object.freeze({
 export const TABS = Object.freeze([
   { key: "body", label: "Corpo", icon: "body", framing: "body", categories: [] }, // body type + pronoun + "preset" are built by the creator
   { key: "face", label: "Rosto", icon: "face", framing: "face", categories: ["faceShape", "skin"] },
-  { key: "hair", label: "Cabelo", icon: "hair", framing: "face", categories: ["hairStyle", "hairColour"] },
+  { key: "hair", label: "Cabelo", icon: "hair", framing: "face", categories: ["hairColour", "hairStyle"] },
   { key: "eyes", label: "Olhos e sobrancelhas", icon: "eyes", framing: "face", categories: ["eyeColour", "browShape", "browColour"] },
   { key: "marks", label: "Marcas", icon: "marks", framing: "face", categories: ["marking0", "marking1", "marking2", "marking3"] },
   { key: "facewear", label: "Acessórios", icon: "facewear", framing: "face", categories: ["glasses", "facialHair", "facialHairColor"] },
@@ -73,9 +73,9 @@ export function buildTabs(categories, body) {
     groups: tab.categories.filter(id => categories && Array.isArray(categories[id]) && !(body === "female" && CATEGORIES[id].maleOnly)),
   }));
   const unknown = Object.keys(categories || {}).filter(id => !KNOWN.has(id) && Array.isArray(categories[id])).map(id => ({
-    key: `x-${id.replace(/[^\w-]/g, "_")}`, label: id, icon: "generic", framing: "face", categories: [id], groups: [id], unknown: true,
+    key: `x-${id.replace(/[^\w-]/g, "_")}`, label: "Outras opções", icon: "generic", framing: "face", categories: [id], groups: [id], unknown: true,
   }));
   return [...known.slice(0, FINALISE), ...unknown, known[FINALISE]];
 }
 
-export const groupConfig = id => CATEGORIES[id] || { title: id, control: "grid" };
+export const groupConfig = id => CATEGORIES[id] || { title: "Outras opções", control: "grid" };

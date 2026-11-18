@@ -95,6 +95,15 @@ export default function App() {
     } else { framed.current = false; previewed.current = null; }
   }, [screen]);
 
+  // Keyboard-only players: the lobby starts with the first action focused, so Enter does what the hint says.
+  useEffect(() => {
+    if (screen !== "lobby") return undefined;
+    const frame = requestAnimationFrame(() => {
+      if (!document.activeElement || document.activeElement === document.body) document.querySelector(".char-card .btn--primary, .slot-new")?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [screen]);
+
   // Focus goes back to the "Apagar" button of the card that opened the dialog (or to the first card after a delete).
   useEffect(() => {
     if (dialog || !refocus.current) return;

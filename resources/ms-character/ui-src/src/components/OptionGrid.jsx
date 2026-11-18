@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import Skeleton from "./Skeleton.jsx";
 import IconCheck from "./icons/IconCheck.jsx";
 import IconNone from "./icons/IconNone.jsx";
+import { isTall, optionImage } from "../creatorImages.js";
 
 // Numbered option tiles (STORY-05.06) with live preview. WAI-ARIA listbox + roving tabindex: the arrow keys move
 // the focus in 2D and PREVIEW the option, only click / Enter / Space COMMIT it. This is why it is a listbox and
@@ -31,7 +32,8 @@ export default function OptionGrid({ options, value, none = false, labelledBy, o
       return { id: isObject ? option.id : option, number: index + 1, disabled: isObject && Boolean(option.disabled) };
     }),
   ];
-  const gridClass = `option-grid ${className}`.trim();
+  const withImages = items.some(item => optionImage(item.id));
+  const gridClass = `option-grid${withImages ? " option-grid--images" : ""}${withImages && isTall(options[0]) ? " option-grid--tall" : ""} ${className}`.trim();
 
   if (loading) {
     return (
@@ -121,7 +123,9 @@ export default function OptionGrid({ options, value, none = false, labelledBy, o
           onClick={() => commit(index)}
           onKeyDown={event => onKeyDown(event, index)}
           onKeyUp={event => { if (event.key === " ") event.preventDefault(); }}>
-          {item.none ? <IconNone /> : <span aria-hidden="true">{item.number}</span>}
+          {item.none ? <IconNone /> : optionImage(item.id)
+            ? <><img src={optionImage(item.id)} alt="" draggable="false" /><span className="tile__num" aria-hidden="true">{item.number}</span></>
+            : <span aria-hidden="true">{item.number}</span>}
           <span className="tile__check" aria-hidden="true"><IconCheck /></span>
         </button>
       ))}
