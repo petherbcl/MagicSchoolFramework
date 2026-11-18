@@ -42,6 +42,8 @@ const voiceInput = value => isPlainObject(value) && Object.keys(value).every(key
   && Number.isInteger(value.pitch) && Math.abs(value.pitch) <= VOICE_PITCH_MAX;
 // The real Creator.exportLook() always returns these (findings §3), so a look without them is forged.
 const LOOK_REQUIRED = Object.freeze(["format", "version", "gender", "pronoun", "presets", "gear"]);
+// "Nenhum" (no glasses / no facial hair) is an empty option in the creator: it means the field is absent.
+const OPTIONAL_EMPTY = Object.freeze(["faceGear", "facialHair"]);
 const LOOK_IMPOSED = Object.freeze(["name", "house"]);
 const isPlainObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const lookId = value => typeof value === "string" && value.length <= 128 && LOOK_ID.test(value);
@@ -73,6 +75,7 @@ function lookInput(value, { firstName, lastName, house }) {
   const result = {};
   for (const [key, item] of Object.entries(look)) {
     if (LOOK_STRIPPED.includes(key) || LOOK_IMPOSED.includes(key)) continue;
+    if (OPTIONAL_EMPTY.includes(key) && item === "") continue; // "Nenhum" in the creator may export an empty string
     check(Object.hasOwn(LOOK_FIELDS, key) && LOOK_FIELDS[key](item), "INVALID_LOOK");
     result[key] = item;
   }

@@ -9,6 +9,8 @@ import WorldVignette from "./components/WorldVignette.jsx";
 
 const LOADING_EXIT_MS = 150; // the loading panel fades out before the next screen enters (200 ms)
 const NO_SLOTS = "Atingiste o limite de personagens. Apaga uma personagem para criares outra.";
+const CREATE_TIMEOUT_MS = 10000; // the server never answered a create: unblock the creator (06.01)
+const CREATE_TIMED_OUT = "O servidor não respondeu à criação da personagem. Tenta de novo.";
 const DELETE_TIMEOUT_MS = 10000; // the server never answered a delete: unblock the dialog (STORY-05.12, minor point of 05.09)
 const CREATOR_FAILED = "Não foi possível abrir o criador. Tenta de novo; se o problema persistir, contacta a equipa.";
 const DELETE_FAILED = "Não foi possível apagar a personagem. Tenta de novo; se o problema persistir, contacta a equipa.";
@@ -43,6 +45,7 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [creatorFailed, setCreatorFailed] = useState(false); // creator:error: back to the lobby with a notice
   const [busy, setBusy] = useState(false);       // create in flight
+  const [createTimedOut, setCreateTimedOut] = useState(null); // local notice when a create got no answer
   const [busyId, setBusyId] = useState(null);    // character being entered
   // Delete dialog: { characterId, name, status: "idle" | "deleting" | "error" | "done", state0, notice0 }.
   const [dialog, setDialog] = useState(null);
@@ -59,10 +62,17 @@ export default function App() {
   // A notice that was already there when the creator opened (an old failure) must not show in it. Idempotent, so it
   // is safe during render (StrictMode renders twice).
   if (creatorEntry.current.screen !== screen) creatorEntry.current = { screen, notice };
-  const creatorNotice = screen === "creator" && notice !== creatorEntry.current.notice ? notice : null;
+  const creatorNotice = screen !== "creator" ? null : createTimedOut || (notice !== creatorEntry.current.notice ? notice : null);
 
   // Any server answer (new state or notice) unlocks the buttons; a longer list means creation succeeded.
   useEffect(() => { setBusy(false); setBusyId(null); }, [state, notice]);
+  // No state and no notice within the limit: the creator must not stay blocked forever. The notice also makes the
+  // creator reopen its Creator session, which the client released when it sent the create.
+  useEffect(() => {
+    if (!busy) return undefined;
+    const timer = setTimeout(() => { setBusy(false); setCreateTimedOut({ text: CREATE_TIMED_OUT }); }, CREATE_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [busy]);
   useEffect(() => { setCreating(false); }, [count]);
 
   // Answer to a delete request: a state without the character is success; a notice, or a state that still
@@ -140,7 +150,7 @@ export default function App() {
   else if (screen === "creator") {
     content = (
       <CreateCharacter hasCharacters={count > 0} busy={busy} notice={creatorNotice}
-        onSubmit={input => { setBusy(true); send("create", input); }}
+        onSubmit={input => { setCreateTimedOut(null); setBusy(true); send("create", input); }}
         onExit={() => setCreating(false)}
         onFailed={() => { setCreating(false); setCreatorFailed(true); }} />
     );

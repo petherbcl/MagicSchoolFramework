@@ -2,7 +2,7 @@
 // is not clamped, so the range is ours. Must match VOICE_PITCH_MAX in server/validation.js and client/main.js.
 export const VOICE_PITCH_MAX = 10;
 // Measured in game: tone 1 is the feminine voice and tone 0 the masculine one, so "Voz 1" (feminina) comes first.
-export const TONE_OPTIONS = [{ value: "1", label: "Voz 1 · Feminina" }, { value: "0", label: "Voz 2 · Masculina" }];
+export const TONE_OPTIONS = [{ value: "1", label: "Voz · Feminina" }, { value: "0", label: "Voz · Masculina" }];
 // StepSlider works with option ids (strings): "-10" … "10".
 export const PITCH_OPTIONS = Array.from({ length: VOICE_PITCH_MAX * 2 + 1 }, (_, index) => String(index - VOICE_PITCH_MAX));
 const clampInt = (value, min, max) => (Number.isInteger(value) ? Math.min(max, Math.max(min, value)) : 0);

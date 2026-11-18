@@ -144,6 +144,15 @@ test("lookInput strips scale, scaleMode and boneScales", () => {
   assert.deepEqual(result, expected());
 });
 
+test("lookInput treats an empty faceGear or facialHair (\"Nenhum\") as absent", () => {
+  const result = lookInput(look({ faceGear: "", facialHair: "" }), owner);
+  for (const key of ["faceGear", "facialHair"]) assert.equal(Object.hasOwn(result, key), false, key);
+  const { faceGear, facialHair, ...rest } = look();
+  assert.deepEqual(result, expected(rest));
+  rejects(look({ presets: { skin: "" } }));
+  rejects(look({ wandStyle: "" }));
+});
+
 test("lookInput imposes the character's name and house", () => {
   const result = lookInput(look({ name: { first: "X", last: "Y" }, house: "Slytherin" }), owner);
   assert.deepEqual(result.name, { first: "Ana", last: "Silva" });

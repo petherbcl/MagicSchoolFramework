@@ -6,14 +6,29 @@ Lobby de personagens do MagicSchoolRP (versão 0.2.0). Depende do [ms-core](../m
 
 1. O ms-core emite `ms:playerReady`. O ms-character volta a confirmar a sessão e leva o jogador para o **lobby**: um mundo privado, invisível, invulnerável e preso ao ponto do lobby.
 2. A UI do lobby mostra as personagens da conta, começando pela última jogada:
-   - **Sem personagens:** abre diretamente o formulário de criação (nome, apelido e casa).
-   - **Com personagens:** o jogador escolhe uma com "Jogar" ou cria outra, até `MS_MAX_CHARACTERS`.
+   - **Sem personagens:** abre diretamente o criador de personagens.
+   - **Com personagens:** o jogador escolhe uma com "Jogar", cria outra (até `MS_MAX_CHARACTERS`) ou apaga uma. Ao focar um cartão, a personagem aparece em pré-visualização com a aparência guardada.
 3. Ao escolher, o servidor confirma que a personagem pertence à conta e restaura-a: viagem para Overland, inventário, look, casa e posição guardada. Uma personagem nova aparece no spawn.
 4. O jogador sai do lobby para o mundo 0 e o recurso emite `ms:characterReady`.
 5. A personagem é guardada automaticamente (`MS_SAVE_INTERVAL_SECONDS`) e quando o jogador sai. Os saves usam controlo de versão, por isso um save desatualizado é recusado.
    - **Posição:** só se restauram posições do Overland. Fora do Overland (castelo, masmorras, durante cargas) o save mantém a última posição Overland conhecida.
    - **Falhas no autosave:** uma falha transitória (BD, captura nativa) é repetida no tick seguinte. O jogador só é desligado à 3.ª falha seguida.
    - **Conflito de versão:** desliga o jogador de imediato, porque a personagem foi alterada fora desta sessão (edição na BD, sessão duplicada). A cópia em memória está desatualizada e não deve sobrescrever a da BD.
+
+## Criador de personagens
+
+A aparência só se escolhe na criação (não há edição depois). O criador usa a API `Creator` do cliente sobre a personagem real, com a câmara do `CreatorPreview` (corpo ou rosto, conforme a aba) e a pose parada (`CreatorPreview.freeze`).
+
+- **Abas:** Corpo (tipo de corpo, pronome, **voz** e predefinição), Rosto, Cabelo, Olhos e sobrancelhas, Marcas, Acessórios e Finalizar (nome, apelido e casa).
+- **Pré-visualização:** passar o rato ou o foco por uma opção mostra-a no modelo; só o clique (ou Enter) a confirma.
+- **Voz:** dois timbres (`tone`: Voz 1 feminina, Voz 2 masculina) e a altura (`pitch`, de −10 a 10). A voz toca a cada alteração.
+- **Sair:** Esc ou "Voltar" saem de imediato se nada mudou; com alterações abre "Descartar personagem". A aparência original repõe-se sempre (`Creator.cancel()` sozinho não reverte). Na primeira personagem não há saída.
+- **Criar:** o cliente junta o `look` exportado (`Creator.exportLook()`) ao pedido. O servidor trata-o como um pedido: `lookInput` ([server/validation.js](server/validation.js)) aceita só campos conhecidos, impõe o nome e a casa, remove `scale`, `scaleMode` e `boneScales`, valida a `voice` (`tone` 0 ou 1, `pitch` inteiro até ±10) e limita o tamanho a 16 KB. Os pelos faciais são descartados num corpo feminino.
+- **Imagens:** as miniaturas (`ui-src/src/assets/creator/`) e os brasões (`assets/houses/`) vêm de `UI_Refs/` convertidos para WebP. A chave é o ID da opção do jogo (`HairMale001`…); os penteados femininos usam as imagens masculinas. Opções sem imagem mostram o número.
+
+## Apagar personagens
+
+O jogador apaga uma personagem no lobby, depois de confirmar num diálogo. É um soft delete (ver abaixo).
 
 Se o restauro nativo falhar, o jogador é desligado, porque o estado ficaria a meio. Nesse caso não se emite `ms:characterReady` e não se grava nada.
 
@@ -63,7 +78,8 @@ Events.on("ms:characterReady", ({ playerId, sessionId, characterId }) => {
 
 - **Eventos de servidor:** `ms:characterLobby` e `ms:characterReady`.
 - **API (`Characters`):** `isPlaying`, `getSelected`, `list` e `save`. Os tipos estão em [types/characters.d.ts](types/characters.d.ts).
-- **Eventos de rede:** `ms-character:sync`, `ms-character:create` e `ms-character:select` (cliente → servidor); `ms-character:state` e `ms-character:notice` (servidor → cliente).
+- **Eventos de rede:** `ms-character:sync`, `ms-character:create`, `ms-character:select` e `ms-character:delete` (cliente → servidor); `ms-character:state` e `ms-character:notice` (servidor → cliente). O `state` leva, para o dono da conta, o `look` guardado e `lastPlayedAt` de cada personagem.
+- **Página ↔ cliente:** o contrato (`creator:begin`, `creator:schema`, `creator:patch`, `creator:body`, `creator:voice`…) está em [ui-src/src/bridge.js](ui-src/src/bridge.js).
 
 ## UI (React + Tailwind)
 
@@ -82,6 +98,7 @@ npm.cmd run dev:ui --prefix resources/ms-character     # browser normal, com ser
   - O CSS sai num ficheiro único e a CSP (`'self'` apenas) é injetada só no build. Estilos injetados por JS seriam bloqueados pela CSP.
   - A renderização no jogo é por software: evitar WebGL, `backdrop-filter` e animações pesadas.
 - **Cores:** são tokens Tailwind definidos em [src/index.css](ui-src/src/index.css) (`bg-ink`, `text-gold`, `border-brass`…).
+- **Peso:** `client/ui/` ronda os 1,4 MB (170 ficheiros, quase todos miniaturas). É o que cada jogador descarrega.
 - **Fazer commit de `client/ui/`:** depois de cada alteração à UI, corre o build e faz commit do `client/ui/` gerado. O servidor distribui esses ficheiros tal como estão.
 
 ## Testes
