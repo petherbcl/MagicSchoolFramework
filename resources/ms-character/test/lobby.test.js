@@ -58,8 +58,7 @@ test("create stores state with the sanitised look and rejects a missing or forge
   const f = await fixture(t); await f.join();
   const { characterId } = await f.lobby.create(1, ana);
   const stored = (await f.repository.get(characterId)).state;
-  const { voice, ...rest } = look();
-  assert.deepEqual(stored, { inventory: [], look: { ...rest, name: { first: "Ana", last: "Silva" }, house: "Ravenclaw" }, location: null });
+  assert.deepEqual(stored, { inventory: [], look: { ...look(), name: { first: "Ana", last: "Silva" }, house: "Ravenclaw" }, location: null });
   assert.equal(f.state(1).status, "lobby");
   f.advance(1000); await f.lobby.delete(1, characterId); f.advance(1000);
   const { look: _omit, ...noLook } = ana;

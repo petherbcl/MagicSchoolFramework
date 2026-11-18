@@ -759,3 +759,7 @@ kbd, .keycap {
   .scrim, .dialog, .loading-screen, .screen-enter, .tab-panel { animation: none; }
 }
 /* ===== end LOBBY + DELETE DIALOG + LOADING ===== */
+
+.voice-controls { display: grid; gap: var(--space-4); justify-items: start; }
+.voice-controls > * { width: 100%; max-width: 42rem; }
+.voice-controls > .btn { width: auto; }

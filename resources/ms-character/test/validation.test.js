@@ -43,7 +43,7 @@ test("lookInput accepts the real Creator.exportLook() output from findings §3",
     presets: { browColour: "p1", browShape: "p2", eyeColour: "p3", faceShape: "p4", hairColour: "p5", hairStyle: "p6",
       marking0: "m0", marking1: "m1", marking2: "m2", marking3: "m3", skin: "s1" },
     voice: { pitch: 0, tone: 0 } };
-  const { voice, house, ...rest } = real;
+  const { house, ...rest } = real;
   assert.deepEqual(lookInput(real, owner), { ...rest, name: { first: "Ana", last: "Silva" }, house: "Ravenclaw" });
 });
 
@@ -63,11 +63,18 @@ test("lookInput rejects non-finite numbers, including inside stripped fields", (
   rejects(look({ voice: { tone: Number.NaN, pitch: 1 } }));
 });
 
+test("lookInput keeps a valid voice and rejects out-of-range or malformed ones", () => {
+  assert.deepEqual(lookInput(look({ voice: { tone: 1, pitch: -3 } }), owner).voice, { tone: 1, pitch: -3 });
+  assert.deepEqual(lookInput(look({ voice: { tone: 0, pitch: 10 } }), owner).voice, { tone: 0, pitch: 10 });
+  for (const voice of [{ tone: 2, pitch: 0 }, { tone: -1, pitch: 0 }, { tone: 0.5, pitch: 0 }, { tone: 0, pitch: 11 }, { tone: 0, pitch: -11 },
+    { tone: 0, pitch: 100 }, { tone: 0 }, { pitch: 0 }, { tone: 0, pitch: 0, pad: "x" }, [], "voice", null]) rejects(look({ voice }));
+});
+
 test("lookInput enforces the 16 KB serialized limit", () => {
   // Allowed fields are capped well below 16 KB, so pad through a stripped field: the size guard runs on the raw input.
   const padded = bytes => {
-    const value = look({ voice: { tone: 1, pitch: 1, pad: "" } });
-    value.voice.pad = "x".repeat(bytes - Buffer.byteLength(JSON.stringify(value)));
+    const value = look({ scale: { pad: "" } });
+    value.scale.pad = "x".repeat(bytes - Buffer.byteLength(JSON.stringify(value)));
     assert.equal(Buffer.byteLength(JSON.stringify(value)), bytes);
     return value;
   };
@@ -131,9 +138,9 @@ test("lookInput rejects anything that is not a plain object", () => {
   rejects({ toJSON: () => ["pronoun"] });
 });
 
-test("lookInput strips voice, scale, scaleMode and boneScales", () => {
-  const result = lookInput(look({ voice: { tone: 0.5, pitch: 1 }, scale: 1.1, scaleMode: "visual", boneScales: { spine: 1.2 } }), owner);
-  for (const key of ["voice", "scale", "scaleMode", "boneScales"]) assert.equal(Object.hasOwn(result, key), false, key);
+test("lookInput strips scale, scaleMode and boneScales", () => {
+  const result = lookInput(look({ scale: 1.1, scaleMode: "visual", boneScales: { spine: 1.2 } }), owner);
+  for (const key of ["scale", "scaleMode", "boneScales"]) assert.equal(Object.hasOwn(result, key), false, key);
   assert.deepEqual(result, expected());
 });
 

@@ -26,6 +26,7 @@ let creatorOpen = false;      // the page is in the creator (as opposed to the l
 let pronoun = null;           // chosen pronoun, applied to the exported look on create
 let pendingPatch = null, patchTimer = null;
 let schemaTimer = null, schemaToken = 0, bodyAwait = false;
+let expectPreset = null;      // preset a body switch asked for: the schema is only trusted once the state shows it
 
 function attempt(label, fn) {
   try { return fn(); } catch (error) {
@@ -73,7 +74,8 @@ function expectCommitReply(result) {
 }
 
 function clearTimers() {
-  commitTimer = cancelTimer(commitTimer); commitPending = 0;
+  commitTimer = cancelTimer(commitTimer); commitPending = 0; expectPreset = null;
+  voiceTimer = cancelTimer(voiceTimer); voicePlayTimer = cancelTimer(voicePlayTimer); pendingVoice = null;
   patchTimer = cancelTimer(patchTimer); pendingPatch = null;
   schemaTimer = cancelTimer(schemaTimer); schemaToken++; bodyAwait = false;
 }
@@ -81,7 +83,7 @@ function clearTimers() {
 // Idempotent. Only touches what this resource acquired.
 function release() {
   clearTimers();
-  creatorOpen = false; pronoun = null;
+  creatorOpen = false; pronoun = null; chosenVoice = null;
   if (session !== null) {
     const { originalLook } = session;
     session = null;
@@ -131,17 +133,22 @@ function consistent(schema, state) {
 function buildSchema(force) {
   const schema = Creator.getSchema();
   if (!schema || !schema.categories) return null;
-  if (!force && !consistent(schema, Creator.getState())) return null;
+  const state = Creator.getState();
+  if (!force && (!consistent(schema, state) || (expectPreset !== null && !(state && state.selections && state.selections.preset === expectPreset)))) return null;
+  if (expectPreset !== null && state && state.selections && state.selections.preset !== expectPreset) {
+    state.selections = { ...state.selections, preset: expectPreset }; // forced after a timeout: the game accepted the patch (result 1)
+  }
   return {
     capabilities: Creator.getCapabilities(),
     categories: Object.keys(schema.categories).map(id => ({ id, options: schema.categories[id].options })),
-    state: Creator.getState(),
+    state,
   };
 }
 
 function deliverSchema(force) {
   const payload = attempt("buildSchema", () => buildSchema(force));
   if (!payload) return false;
+  expectPreset = null;
   sendToPage("creator:schema", payload);
   return true;
 }
@@ -180,7 +187,7 @@ function beginCreator() {
   } else if (!attempt("open creator session", acquire)) {
     release(); failCreator("CREATOR_BEGIN_FAILED"); return;
   }
-  creatorOpen = true; pronoun = null;
+  creatorOpen = true; pronoun = null; chosenVoice = null;
   sendSchemaWhenReady();
 }
 
@@ -222,6 +229,7 @@ function onBody(payload) {
   if (session === null || !creatorOpen || !payload || !isId(payload.preset) || payload.preset === "") return;
   // A queued preview was made against the old body's IDs.
   patchTimer = cancelTimer(patchTimer); pendingPatch = null;
+  expectPreset = payload.preset;
   applyPatchNow("preset", payload.preset);
   // The game applies the patch a few ms later: wait for its creatorChanged (or a short fallback) before reading the
   // new schema, otherwise the old body's schema and state still agree with each other and would be sent again.
@@ -246,9 +254,45 @@ function onCreate(payload) {
   if (session === null || !creatorOpen) { Events.emitServer("ms-character:create", request); return; }
   const exported = attempt("exportLook", () => Creator.exportLook());
   if (!exported) { sendToPage("creator:error", { code: "LOOK_EXPORT_FAILED" }); return; }
-  const look = pronoun ? { ...exported, pronoun } : exported;
+  const look = { ...exported, ...(pronoun ? { pronoun } : {}), ...(chosenVoice ? { voice: chosenVoice } : {}) };
   Events.emitServer("ms-character:create", { ...request, look });
   release();
+}
+
+// Voice (findings §8): setVoice takes integers; tone is clamped by the game to 0..1, pitch is not clamped, so the
+// limit is ours (VOICE_PITCH_MAX, the same one the server enforces). Like a patch, it applies a few ms later.
+const VOICE_PITCH_MAX = 10;
+const VOICE_PLAY_DELAY_MS = 120;
+let voiceTimer = null, voicePlayTimer = null, pendingVoice = null, chosenVoice = null; // chosenVoice goes into the created look (exportLook can lag a few ms)
+const isVoice = voice => voice && typeof voice === "object" && Number.isInteger(voice.tone) && voice.tone >= 0 && voice.tone <= 1
+  && Number.isInteger(voice.pitch) && Math.abs(voice.pitch) <= VOICE_PITCH_MAX;
+function onVoice(payload) {
+  if (session === null || !creatorOpen || !isVoice(payload)) return;
+  chosenVoice = { tone: payload.tone, pitch: payload.pitch };
+  pendingVoice = { tone: payload.tone, pitch: payload.pitch, sessionId: session.id };
+  voiceTimer = cancelTimer(voiceTimer);
+  voiceTimer = setTimeout(() => {
+    voiceTimer = null;
+    const voice = pendingVoice; pendingVoice = null;
+    if (!voice || session === null || session.id !== voice.sessionId) return;
+    attempt("setVoice", () => Creator.setVoice({ tone: voice.tone, pitch: voice.pitch }));
+  }, PREVIEW_DEBOUNCE_MS);
+}
+function onVoicePreview() {
+  if (session === null || !creatorOpen) return;
+  // A queued change must be applied before the sample plays.
+  if (voiceTimer !== null) {
+    voiceTimer = cancelTimer(voiceTimer);
+    const voice = pendingVoice; pendingVoice = null;
+    if (voice && session.id === voice.sessionId) attempt("setVoice", () => Creator.setVoice({ tone: voice.tone, pitch: voice.pitch }));
+  }
+  // The game applies setVoice a few ms later (like a patch): play after that, or the previous voice is heard.
+  const sessionId = session.id;
+  voicePlayTimer = cancelTimer(voicePlayTimer);
+  voicePlayTimer = setTimeout(() => {
+    voicePlayTimer = null;
+    if (session !== null && session.id === sessionId) attempt("previewVoice", () => Creator.previewVoice());
+  }, VOICE_PLAY_DELAY_MS);
 }
 
 function onSelect(payload) {
@@ -292,6 +336,8 @@ function show(state) {
     Web.on(view, "creator:patch", onPatch);
     Web.on(view, "creator:body", onBody);
     Web.on(view, "creator:pronoun", onPronoun);
+    Web.on(view, "creator:voice", onVoice);
+    Web.on(view, "creator:voice:preview", onVoicePreview);
   }
   flush();
   // Back in the lobby after a failed select/create: the session was released, so open it again.

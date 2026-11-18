@@ -33,7 +33,13 @@ function characterInput(value) {
 // LookJson (#api-client-lookjson), plan §4.3. Every key is either allowed, stripped or imposed by the server.
 const LOOK_MAX_BYTES = 16 * 1024;
 const LOOK_ID = /^[\w.\-/:#]+$/;
-const LOOK_STRIPPED = Object.freeze(["voice", "scale", "scaleMode", "boneScales"]);
+const LOOK_STRIPPED = Object.freeze(["scale", "scaleMode", "boneScales"]);
+// Measured in game (findings §8): setVoice takes integers, tone is clamped to 0..1 and pitch is not clamped at all.
+// The pitch limit is ours (must match VOICE_PITCH_MAX in ui-src/src/voice.js).
+const VOICE_PITCH_MAX = 10;
+const voiceInput = value => isPlainObject(value) && Object.keys(value).every(key => key === "tone" || key === "pitch")
+  && Number.isInteger(value.tone) && value.tone >= 0 && value.tone <= 1
+  && Number.isInteger(value.pitch) && Math.abs(value.pitch) <= VOICE_PITCH_MAX;
 // The real Creator.exportLook() always returns these (findings §3), so a look without them is forged.
 const LOOK_REQUIRED = Object.freeze(["format", "version", "gender", "pronoun", "presets", "gear"]);
 const LOOK_IMPOSED = Object.freeze(["name", "house"]);
@@ -52,6 +58,7 @@ const LOOK_FIELDS = Object.freeze({
   pronoun: value => value === "witch" || value === "wizard",
   hood: value => typeof value === "boolean",
   wandStyle: lookId,
+  voice: voiceInput,
 });
 function lookInput(value, { firstName, lastName, house }) {
   if (![firstName, lastName, house].every(item => typeof item === "string")) throw new TypeError("lookInput requires the character's firstName, lastName and house");
@@ -80,4 +87,4 @@ function publicId(value) {
   check(typeof id === "string" && /^[1-9][0-9]{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n, "INVALID_ID");
   return id;
 }
-module.exports = { CharacterError, check, clone, json, characterInput, lookInput, publicId, HOUSES };
+module.exports = { CharacterError, check, clone, json, characterInput, lookInput, publicId, HOUSES, VOICE_PITCH_MAX };

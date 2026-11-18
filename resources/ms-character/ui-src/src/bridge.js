@@ -22,6 +22,8 @@ import { useEffect, useState } from "react";
 //   "creator:body"    { preset }                            applyPatch({ preset }) with a BodyFemale…/BodyMale… ID.
 //                                                            The schema changes to the other body's IDs, so the
 //                                                            client sends creator:schema again.
+//   "creator:voice"   { tone: 0 | 1, pitch: -10..10 }       Creator.setVoice after 80 ms; also kept for the created look
+//   "creator:voice:preview" null                           Creator.previewVoice() (after the change is applied); sent with every voice change
 //   "creator:pronoun" { pronoun: "witch" | "wizard" }       Kept by the client and added to look.pronoun on create
 //                                                            (independent of the body).
 //
@@ -102,6 +104,8 @@ const mockHandlers = {
   },
   "creator:cancel": () => { creator = null; },
   "creator:pronoun": ({ pronoun }) => { if (creator && (pronoun === "witch" || pronoun === "wizard")) creator.pronoun = pronoun; },
+  "creator:voice": () => {},
+  "creator:voice:preview": () => {},
   "creator:body": ({ preset }) => setTimeout(() => applyPreset(preset), CREATOR_LATENCY_MS),
   "creator:patch": ({ category, id, commit }) => setTimeout(() => {
     if (!creator) return;

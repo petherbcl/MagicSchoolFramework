@@ -19,7 +19,7 @@ function harness({ screenWidth = 1920, beginResult = true, schemaReadyAfterPolls
   const handlers = {};
   const viewHandlers = {};
   let timers = [], nextTimer = 1, now = 0;
-  let active = false, polls = 0, schemaGender = 0;
+  let active = false, polls = 0, schemaGender = 0, appliedPreset = null;
   const account = { format: "arcanemp-look", gender: "male", pronoun: "wizard", presets: { hairStyle: "account" } };
   let current = account;
 
@@ -29,9 +29,11 @@ function harness({ screenWidth = 1920, beginResult = true, schemaReadyAfterPolls
     cancel: () => { log("cancel"); active = false; return true; },
     importLook: look => { log("importLook", look); if (importThrows) throw new Error("boom"); current = look; return true; },
     isActive: () => active,
-    applyPatch: patch => { log("applyPatch", patch); return 1; },
+    applyPatch: patch => { log("applyPatch", patch); if (patch.preset) appliedPreset = patch.preset; return 1; },
     getSchema: () => (polls++ < schemaReadyAfterPolls ? null : { gender: schemaGender, categories: { hairStyle: { options: ["a", "b"], count: 2 } } }),
-    getState: () => ({ gender: schemaGender, selections: {} }),
+    getState: () => ({ gender: schemaGender, selections: appliedPreset ? { preset: appliedPreset } : {} }),
+    setVoice: voice => { log("setVoice", voice); return true; },
+    previewVoice: () => { log("previewVoice"); return true; },
     getCapabilities: () => ({ version: 9 }),
   };
   const sandbox = {
@@ -203,6 +205,32 @@ test("creator:body resends the schema after the fallback when no creatorChanged 
   h.viewHandlers["creator:body"]({ preset: "BodyMale002" });
   h.advance(250);
   assert.equal(h.calls.filter(c => c[0] === "emit" && c[1] === "creator:schema").length, 1);
+});
+
+test("voice changes are debounced, validated, flushed before the preview and kept for the created look", () => {
+  const h = harness();
+  openLobby(h);
+  h.viewHandlers["creator:begin"]();
+  h.clear();
+  for (const voice of [{ tone: 2, pitch: 0 }, { tone: 0.5, pitch: 0 }, { tone: 0, pitch: 11 }, { tone: 0, pitch: "1" }, null, "x"]) h.viewHandlers["creator:voice"](voice);
+  h.advance(500);
+  assert.equal(h.names().includes("setVoice"), false, "invalid voices are ignored");
+  h.viewHandlers["creator:voice"]({ tone: 0, pitch: 1 });
+  h.viewHandlers["creator:voice"]({ tone: 1, pitch: 4 });
+  h.advance(79);
+  assert.equal(h.names().includes("setVoice"), false);
+  h.advance(1);
+  same(h.calls.filter(c => c[0] === "setVoice"), [["setVoice", { tone: 1, pitch: 4 }]]);
+  h.clear();
+  h.viewHandlers["creator:voice"]({ tone: 0, pitch: -3 });
+  h.viewHandlers["creator:voice:preview"]();
+  same(h.names(), ["setVoice"]);
+  h.advance(119);
+  assert.equal(h.names().includes("previewVoice"), false, "plays only after the game applied the voice");
+  h.advance(1);
+  same(h.names(), ["setVoice", "previewVoice"]);
+  h.viewHandlers.create({ firstName: "Ana", lastName: "Silva", house: "Ravenclaw" });
+  same(h.calls.find(c => c[0] === "emitServer")[2].look.voice, { tone: 0, pitch: -3 });
 });
 
 test("create sends the exported look with the pronoun kept across a body change, then releases", () => {

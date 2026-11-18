@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { send } from "./bridge.js";
 import { bodyOf, firstBodyPreset, toValues } from "./creatorCategories.js";
+import { voiceOf } from "./voice.js";
 
 // Creator session of the page (STORY-05.11), the page side of plan §4.4: creator:begin on mount, then
 // creator:schema / creator:state / creator:error from the client, and creator:patch / body / pronoun / cancel back.
@@ -12,7 +13,8 @@ import { bodyOf, firstBodyPreset, toValues } from "./creatorCategories.js";
 export const PREVIEW_DEBOUNCE_MS = 80;
 const BODY_TIMEOUT_MS = 2000; // a body switch without a new schema must not leave the grids loading forever
 
-const EMPTY = { schema: null, values: {}, pronoun: "wizard", bodyPending: null };
+const EMPTY = { schema: null, values: {}, pronoun: "wizard", bodyPending: null, gender: null, voice: { tone: 0, pitch: 0 } };
+const genderOf = state => (state?.gender === 1 ? "female" : state?.gender === 0 ? "male" : null); // CreatorState.gender: 0 male, 1 female
 const asPronoun = value => (value === "witch" || value === "wizard" ? value : null);
 
 export function useCreatorSession({ onFailed }) {
@@ -88,6 +90,16 @@ export function useCreatorSession({ onFailed }) {
     send("creator:body", { preset });
   }, [settle, update]);
 
+  // Voice is not part of the schema: the page owns it and the client applies it after 80 ms.
+  // Every change plays the voice, so the player hears what they picked.
+  const setVoice = useCallback(change => {
+    const voice = { ...modelRef.current.voice, ...change };
+    setDirty(true);
+    update({ voice });
+    send("creator:voice", voice);
+    send("creator:voice:preview");
+  }, [update]);
+
   const choosePronoun = useCallback(pronoun => {
     const value = asPronoun(pronoun);
     if (!value) return;
@@ -119,9 +131,14 @@ export function useCreatorSession({ onFailed }) {
       awaiting.current = 0;
       if (resendPronoun.current && chosenPronoun.current) send("creator:pronoun", { pronoun: chosenPronoun.current });
       resendPronoun.current = false;
+      update(model => {
+        const values = toValues(detail.state);
+        // The look the game starts with may carry no `preset`: keep the one the player just chose while it still exists.
+        if (values.preset === undefined && model.values.preset !== undefined && categories.preset?.includes(model.values.preset)) values.preset = model.values.preset;
+        return { values, gender: genderOf(detail.state), voice: voiceOf(detail.state) };
+      });
       update({
         schema: { categories, capabilities: detail.capabilities || null },
-        values: toValues(detail.state),
         pronoun: chosenPronoun.current ?? asPronoun(detail.state?.pronoun) ?? "wizard",
         bodyPending: null,
       });
@@ -147,6 +164,7 @@ export function useCreatorSession({ onFailed }) {
     };
   }, [update]);
 
-  const body = model.bodyPending?.target ?? bodyOf(model.values.preset);
-  return { ...model, ready: model.schema !== null, body, currentBody: bodyOf(model.values.preset), dirty, preview, commit, settle, switchBody, choosePronoun, rebegin };
+  const current = bodyOf(model.values.preset) ?? model.gender;
+  const body = model.bodyPending?.target ?? current;
+  return { ...model, ready: model.schema !== null, body, currentBody: current, dirty, preview, commit, settle, switchBody, choosePronoun, setVoice, rebegin };
 }

@@ -13,6 +13,7 @@ import OptionGrid from "./OptionGrid.jsx";
 import Screen from "./Screen.jsx";
 import Skeleton from "./Skeleton.jsx";
 import StepSlider from "./StepSlider.jsx";
+import { PITCH_OPTIONS, TONE_OPTIONS } from "../voice.js";
 
 const FIRST_TEXT = "Ainda não tens personagens. Cria a primeira para entrares no mundo.";
 const BODY_OPTIONS = [{ value: "female", label: "Feminino" }, { value: "male", label: "Masculino" }];
@@ -179,6 +180,14 @@ export default function CreateCharacter({ hasCharacters, busy, notice, onSubmit,
           <Group id="creator-g-pronoun" title="Pronome">
             <ChoiceGroup options={PRONOUN_OPTIONS} value={session.pronoun} labelledBy="creator-g-pronoun" disabled={busy}
               onChange={session.choosePronoun} />
+          </Group>
+          <Group id="creator-g-voice" title="Voz">
+            <div className="voice-controls">
+            <ChoiceGroup options={TONE_OPTIONS} value={String(session.voice.tone)} labelledBy="creator-g-voice" disabled={busy}
+              onChange={value => session.setVoice({ tone: Number(value) })} />
+            <StepSlider options={PITCH_OPTIONS} value={String(session.voice.pitch)} label="Altura da voz" disabled={busy}
+              onCommit={value => session.setVoice({ pitch: Number(value) })} />
+            </div>
           </Group>
           {session.schema.categories.preset && renderGroup("preset")}
         </>
