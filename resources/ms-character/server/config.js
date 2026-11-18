@@ -29,6 +29,10 @@ function loadConfig(env = process.env, options = {}) {
     databaseUrl, databaseConfigured: Boolean(databaseUrl),
     poolSize: integer(env, "MS_CHARACTER_POOL_SIZE", 3, 1, 20), queryTimeoutMs: 10000,
     maxCharacters: integer(env, "MS_MAX_CHARACTERS", 1, 1, 5),
+    // Creation cap per account over 24 h, deleted characters included (M-01): create/delete cycles cannot grow the DB.
+    maxCreationsPerDay: integer(env, "MS_MAX_CREATIONS_PER_DAY", 5, 1, 100),
+    // Soft-deleted characters older than this are purged for good (they stay recoverable until then).
+    deletedRetentionDays: integer(env, "MS_DELETED_RETENTION_DAYS", 30, 1, 3650),
     saveIntervalMs: integer(env, "MS_SAVE_INTERVAL_SECONDS", 30, 5, 300) * 1000,
     // Each lobby gets its own private virtual world; ms-core quarantine uses 3000000000+.
     lobbyWorldBase: 3100000000,

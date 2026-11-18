@@ -56,6 +56,22 @@ function setFrame(name) {
   CreatorPreview.setCamera({ ...base, shift: base.shift * (width / REFERENCE_WIDTH) });
 }
 
+// Turns the previewed character. The page is untrusted input for the game: finite numbers only, clamped per call.
+const ROTATE_MAX_DELTA = 45;
+function onRotate(payload) {
+  if (session === null || !payload || typeof payload !== "object") return;
+  const delta = Number(payload.delta);
+  if (!Number.isFinite(delta) || delta === 0) return;
+  const applied = Math.max(-ROTATE_MAX_DELTA, Math.min(ROTATE_MAX_DELTA, delta));
+  if (attempt("rotate", () => { CreatorPreview.rotate(applied); return true; })) turned += applied;
+}
+// rotate() is relative and there is no getter, so the total is tracked to be undone on release.
+let turned = 0;
+function unrotate() {
+  const back = turned; turned = 0;
+  if (back !== 0) attempt("unrotate", () => CreatorPreview.rotate(-back));
+}
+
 // ---- Creator session (STORY-04.02 / 04.03) -----------------------------------------------------------------------
 
 // getState() right after applyPatch() can still return the old selection: the game applies the patch a few ms
@@ -84,6 +100,7 @@ function clearTimers() {
 function release() {
   clearTimers();
   creatorOpen = false; pronoun = null; chosenVoice = null;
+  if (session !== null) unrotate(); // back to the initial angle, while the preview is still frozen
   if (session !== null) {
     const { originalLook } = session;
     session = null;
@@ -331,6 +348,7 @@ function show(state) {
     Web.on(view, "delete", payload => Events.emitServer("ms-character:delete", payload));
     Web.on(view, "camera:frame", payload => { if (payload && typeof payload === "object") attempt("camera:frame", () => setFrame(payload.framing)); });
     Web.on(view, "lobby:preview", onLobbyPreview);
+    Web.on(view, "model:rotate", onRotate);
     Web.on(view, "creator:begin", beginCreator);
     Web.on(view, "creator:cancel", cancelCreator);
     Web.on(view, "creator:patch", onPatch);

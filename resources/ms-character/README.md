@@ -41,6 +41,8 @@ Por omissão usa o `MS_DATABASE_URL` do `resources/ms-core/.env`. Um `.env` pró
 | `MS_CHARACTER_POOL_SIZE` | 3 | Pool PostgreSQL, 1–20 |
 | `MS_MAX_CHARACTERS` | 1 | Personagens por conta, 1–5 |
 | `MS_SAVE_INTERVAL_SECONDS` | 30 | Autosave, 5–300 |
+| `MS_MAX_CREATIONS_PER_DAY` | 5 | Personagens que uma conta pode criar em 24 h, **incluindo as apagadas**, 1–100. Impede ciclos de criar e apagar que encheriam a BD |
+| `MS_DELETED_RETENTION_DAYS` | 30 | Dias que uma personagem apagada fica recuperável; depois é eliminada de vez (purga ao arrancar e de hora a hora), 1–3650 |
 
 As coordenadas do lobby e do spawn de personagens novas estão em [server/config.js](server/config.js).
 
@@ -57,14 +59,26 @@ SELECT user_id,first_name,last_name,house,state,version,created_at,updated_at FR
 
 ### Recuperar uma personagem apagada
 
-Apagar uma personagem é um soft delete: a linha fica com `deleted_at` preenchido, deixa de aparecer no lobby, deixa de contar para o limite e fica registada em `ms_core.ms_audit_log` (`character.deleted`). Um admin recupera-a com esta SQL, substituindo `$1` pelo ID da personagem e `<nome>` pelo seu nome:
+Apagar uma personagem é um soft delete: a linha fica com `deleted_at` preenchido, deixa de aparecer no lobby, deixa de contar para o limite `MS_MAX_CHARACTERS` e fica registada em `ms_core.ms_audit_log` (`character.deleted`). Fica recuperável durante `MS_DELETED_RETENTION_DAYS` dias; depois é eliminada de vez.
+
+Um admin recupera-a no `psql`, numa só instrução atómica. Só restaura se a personagem estiver apagada e se a conta tiver vaga, e só então regista `character.restored`:
 
 ```sql
--- Confirmar primeiro que a conta tem vaga: as personagens ativas têm de ser menos do que MS_MAX_CHARACTERS.
-UPDATE ms_character.characters SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL;
+\set cid 123        -- ID da personagem
+\set max 1          -- o valor de MS_MAX_CHARACTERS
+\set admin 'nome'   -- quem restaura (sem aspas dentro do nome)
+WITH r AS (
+  UPDATE ms_character.characters c SET deleted_at = NULL
+  WHERE c.id = :cid AND c.deleted_at IS NOT NULL
+    AND (SELECT count(*) FROM ms_character.characters x WHERE x.user_id = c.user_id AND x.deleted_at IS NULL) < :max
+  RETURNING c.id, c.user_id)
 INSERT INTO ms_core.ms_audit_log(actor, action, user_id, details)
-  SELECT 'admin:<nome>', 'character.restored', user_id, jsonb_build_object('characterId', id::text) FROM ms_character.characters WHERE id = $1;
+SELECT 'admin:' || :'admin', 'character.restored', user_id, jsonb_build_object('characterId', id::text) FROM r;
 ```
+
+`INSERT 0 0` quer dizer que nada foi restaurado: a personagem não estava apagada, não existe, já foi purgada ou a conta não tem vaga.
+
+Tentativas de apagar ou escolher personagens de outra conta ficam em `ms_core.ms_audit_log` como `character.delete_denied` e `character.select_denied`.
 
 ## Integração
 

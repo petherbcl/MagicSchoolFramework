@@ -1,5 +1,5 @@
 "use strict";
-const { check, clone, publicId } = require("./validation");
+const { check, clone, publicId, CharacterError } = require("./validation");
 const MAX_SAVE_FAILURES = 3;
 const errorCode = error => error?.code || error?.name || "UNKNOWN";
 
@@ -25,6 +25,13 @@ function createLobby({ repository, config, game, core, emit = () => {}, logger =
     if (lobbies.get(l.playerId) !== l) return;
     game.send(l.player, "ms-character:state", { status: l.status, characters: l.characters.map(lobbyCharacter),
       maxCharacters: config.maxCharacters, characterId: l.character?.characterId || null });
+  }
+  // A refused ownership check leaves a trace (the throttle already caps how often this can happen), then rethrows.
+  async function denied(l, action, characterId, error) {
+    if (error?.code === "CHARACTER_NOT_FOUND") {
+      await repository.audit(action, l.userId, { characterId: String(characterId).slice(0, 19) }).catch(() => logger.error("[ms-character] audit failed: " + action));
+    }
+    throw error;
   }
   function throttle(l) { check(clock() - l.lastActionAt >= 750, "RATE_LIMITED"); l.lastActionAt = clock(); }
   function save(l) {
@@ -71,7 +78,7 @@ function createLobby({ repository, config, game, core, emit = () => {}, logger =
     const l = lobbyOf(playerId); check(l.status === "lobby", "INVALID_STATE"); throttle(l);
     l.status = "creating";
     try {
-      const character = await repository.create(l.userId, input, config.maxCharacters); ensure(l);
+      const character = await repository.create(l.userId, input, config.maxCharacters, config.maxCreationsPerDay); ensure(l);
       l.characters = await repository.list(l.userId); ensure(l);
       return summary(character);
     } finally { if (lobbies.get(l.playerId) === l && l.status === "creating") { l.status = "lobby"; send(l); } }
@@ -81,7 +88,7 @@ function createLobby({ repository, config, game, core, emit = () => {}, logger =
     const l = lobbyOf(playerId); check(l.status === "lobby", "INVALID_STATE"); throttle(l);
     l.status = "deleting";
     try {
-      await repository.delete(publicId(characterId), l.userId); ensure(l);
+      await repository.delete(publicId(characterId), l.userId).catch(error => denied(l, "character.delete_denied", characterId, error)); ensure(l);
       l.characters = await repository.list(l.userId); ensure(l);
     } finally { if (lobbies.get(l.playerId) === l && l.status === "deleting") { l.status = "lobby"; send(l); } }
   }
@@ -91,7 +98,7 @@ function createLobby({ repository, config, game, core, emit = () => {}, logger =
     let character;
     try {
       character = await repository.get(publicId(characterId)); ensure(l);
-      check(character && character.userId === l.userId, "CHARACTER_NOT_FOUND");
+      if (!character || character.userId !== l.userId) await denied(l, "character.select_denied", characterId, new CharacterError("CHARACTER_NOT_FOUND"));
     } catch (error) {
       if (lobbies.get(l.playerId) === l && l.status === "applying") { l.status = "lobby"; send(l); }
       throw error;
@@ -100,7 +107,7 @@ function createLobby({ repository, config, game, core, emit = () => {}, logger =
       l.character = character;
       await game.apply(l.player, clone(character), () => valid(l) && l.status === "applying", l.token); ensure(l);
       game.release(l.player, l); l.status = "playing";
-      await repository.touch(character.characterId); ensure(l);
+      await repository.touch(character.characterId, l.userId); ensure(l);
       await save(l); ensure(l); send(l);
       event("ms:characterReady", { playerId: l.playerId, sessionId: l.sessionId, userId: l.userId, characterId: character.characterId });
       return summary(character);
@@ -135,7 +142,8 @@ function createLobby({ repository, config, game, core, emit = () => {}, logger =
   });
   return { api, open, create, delete: remove, select, saveAll,
     guard(id) { const l = lobbies.get(id); return () => Boolean(l && lobbies.get(id) === l); },
-    sync(id) { send(lobbyOf(id)); },
+    // Ignored (no notice) when repeated within 500 ms: each one serializes the whole state, looks included (L-02).
+    sync(id) { const l = lobbyOf(id); if (clock() - (l.lastSyncAt || 0) < 500) return; l.lastSyncAt = clock(); send(l); },
     disconnect(id) { const l = lobbies.get(id); return l ? detach(l) : Promise.resolve(); },
     sessionEnded(sessionId) { for (const l of lobbies.values()) if (l.sessionId === sessionId) return detach(l); return Promise.resolve(); },
     async stop() { if (closing) return; closing = true; await Promise.all([...lobbies.values()].map(l => detach(l, "A seleção de personagens reiniciou. Volta a ligar."))); },

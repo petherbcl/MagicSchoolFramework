@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 // The CEF page is served from fw://resources/ms-character/client/ui/. Module scripts with
 // `crossorigin` over a custom scheme are a CORS risk, so the bundle is a classic IIFE loaded
 // with `defer`, exactly like the hand-written page it replaces. The CSP stays 'self'-only.
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'";
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'";
 function classicScripts() {
   return {
     name: "ms-classic-scripts",

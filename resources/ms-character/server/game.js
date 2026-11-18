@@ -8,6 +8,7 @@ const HOLD = "ms-character:lobby";
 // playerMapTravelComplete) or callbacks, always with a timeout.
 function createGameAdapter(config, { setTimeout: later = setTimeout, clearTimeout: cancel = clearTimeout } = {}) {
   const pending = new Map();
+  const lookFailed = new Set(); // players whose stored look the game rejected: capture() keeps the stored one
   function wait(token, action, timeoutMs = 20000) {
     return new Promise((resolve, reject) => {
       const key = Symbol("native");
@@ -64,8 +65,16 @@ function createGameAdapter(config, { setTimeout: later = setTimeout, clearTimeou
       check(Number.isInteger(result?.revision), "INVALID_INVENTORY_REVISION");
       await wait(token, done => player.inventory.waitForRevision(result.revision).then(value => done(null, value), done));
       ensure();
+      lookFailed.delete(player.id);
       if (character.state.look) {
-        await callback(token, done => player.setLook(character.state.look, done));
+        // A look the game rejects (an asset ID it does not know, a removed asset) must not lock the character out:
+        // log it and play with the current look. The stored look is kept untouched (see capture).
+        try { await callback(token, done => player.setLook(character.state.look, done)); }
+        catch (error) {
+          if (error?.code === "SESSION_EXPIRED") throw error;
+          lookFailed.add(player.id);
+          console.error("[ms-character] setLook failed, keeping the stored look: " + (error?.code || error?.name || "UNKNOWN"));
+        }
         ensure();
       }
       player.house = character.house;
@@ -88,7 +97,7 @@ function createGameAdapter(config, { setTimeout: later = setTimeout, clearTimeou
       const kept = previous.location?.areaId === "Overland" ? previous.location : null;
       return clone({
         inventory: player.inventory.list(),
-        look: player.getLook() || previous.look || null,
+        look: lookFailed.has(player.id) ? previous.look || null : player.getLook() || previous.look || null,
         location: usable ? { areaId: location.areaId, x: location.x, y: location.y, z: location.z, yaw: location.yaw } : kept,
       });
     },
@@ -103,6 +112,7 @@ function createGameAdapter(config, { setTimeout: later = setTimeout, clearTimeou
     cancel(lobby) {
       for (const entry of [...pending.values()]) if (entry.token === lobby.token) entry.finish(new CharacterError("SESSION_EXPIRED"));
       lobby.player.release(HOLD);
+      lookFailed.delete(lobby.player.id);
     },
   };
 }

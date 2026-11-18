@@ -3,6 +3,7 @@ import Divider from "./ornaments/Divider.jsx";
 import FrameCorner from "./ornaments/FrameCorner.jsx";
 import KeyHints from "./KeyHints.jsx";
 import NoticeZone from "./NoticeZone.jsx";
+import RotateControl from "./RotateControl.jsx";
 
 // Two-column screen layout of lobby.html and loading.html: the panel (title, divider, scrolling content, server
 // notice zone) on the left, the transparent avatar anchor on the right and the key-hint strip over its bottom.
@@ -35,7 +36,7 @@ export default function Screen({
         <NoticeZone text={notice} />
       </main>
       {anchor && <AvatarAnchor />}
-      {(hints || stage) && <div className="stage-actions">{stage}{hints && <KeyHints hints={hints} />}</div>}
+      {(hints || stage || anchor) && <div className="stage-actions">{stage}{anchor && <RotateControl />}{hints && <KeyHints hints={hints} />}</div>}
     </div>
   );
 }

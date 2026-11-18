@@ -347,7 +347,7 @@ kbd, .keycap {
 .tile:focus-visible, .tile.is-focus { outline: 2px solid var(--color-focus); outline-offset: 4px; }
 .tile[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; transform: none; }
 .tile[aria-disabled="true"]::after { opacity: 0; }
-.tile--none svg { width: 1.5rem; height: 1.5rem; }
+.tile--none > svg { width: 1.5rem; height: 1.5rem; } /* the "no option" icon only, not the selected check badge */
 /* Thumbnail tiles (UI_Refs/criacao): larger tiles, the image fills them, the number sits in a corner. */
 .option-grid--images { --tile-min: 5.5rem; }
 .option-grid--tall .tile { aspect-ratio: 1 / 1.6; }
@@ -483,6 +483,18 @@ kbd, .keycap {
   pointer-events: none;
 }
 .stage-actions > * { pointer-events: auto; }
+[data-avatar-anchor] { cursor: grab; touch-action: none; user-select: none; }
+[data-avatar-anchor]:active { cursor: grabbing; }
+.rotate { display: flex; align-items: center; gap: var(--space-3); }
+.rotate__label { font-family: var(--font-display, inherit); font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-parchment, inherit); opacity: 0.8; }
+.rotate__btn {
+  width: 2.75rem; height: 2.75rem; display: grid; place-items: center; border-radius: 9999px; cursor: pointer;
+  color: var(--color-accent-primary); background: rgb(0 0 0 / 0.35); border: 1px solid var(--color-brass);
+  touch-action: none; user-select: none;
+}
+.rotate__btn svg { width: 1.4rem; height: 1.4rem; }
+.rotate__btn:hover { background: rgb(0 0 0 / 0.55); }
+.rotate__btn:focus-visible { outline: 2px solid var(--color-accent-primary); outline-offset: 2px; }
 /* No own background: the vignette bottom band (>= 0.85 alpha) guarantees the contrast. Parchment text only. */
 .stage-actions .hintbar { width: 100%; background: none; padding: var(--space-4) var(--space-2) var(--space-1); }
 

@@ -4,7 +4,7 @@ const { Repository } = require("./database/repository");
 const { createLobby } = require("./lobby");
 const { createGameAdapter } = require("./game");
 const { CharacterError } = require("./validation");
-let lobby, repository, game, config, saveTimer, ready = false;
+let lobby, repository, game, config, saveTimer, purgeTimer, ready = false;
 // Resolved on every call so an "ensure ms-core" reload never leaves a stale export behind.
 const Core = { Users: {
   get: id => Exports.get("ms-core", "Core")?.Users.get(id) ?? null,
@@ -14,6 +14,7 @@ const messages = { INVALID_NAME: "Usa nomes com 2 a 32 letras.", INVALID_HOUSE: 
   INVALID_CHARACTER: "Dados de personagem inválidos.", INVALID_LOOK: "Aparência inválida. Volta a tentar.",
   CHARACTER_LIMIT: "Atingiste o limite de personagens. Apaga uma personagem para criares outra.",
   CHARACTER_NOT_FOUND: "A personagem não pertence à tua conta.", INVALID_ID: "Personagem inválida.",
+  CREATE_COOLDOWN: "Criaste demasiadas personagens nas últimas 24 horas. Tenta de novo mais tarde.",
   RATE_LIMITED: "Aguarda antes de repetir.", INVALID_STATE: "Aguarda a etapa atual." };
 const DELETE_FAILED = "Não foi possível apagar a personagem. Tenta de novo; se o problema persistir, contacta a equipa.";
 // Deleting never touches the native state, so its unexpected failures are a notice instead of a kick.
@@ -21,12 +22,19 @@ const deleteFailures = Object.freeze({ overrides: Object.freeze({ INVALID_STATE:
 
 // Errors with a known code become a notice (per-operation overrides first). Anything else kicks, because the
 // native state is unknown, unless the operation supplies its own `unexpected` notice.
+// One RATE_LIMITED notice per player every 2 s: a flood of requests must not become a flood of notices (L-02).
+const rateNoticeAt = new Map();
 function safe(player, fn, { overrides = {}, unexpected = null } = {}) {
   const same = lobby?.guard(player.id) || (() => false);
   const notice = text => player.emit("ms-character:notice", JSON.stringify({ text }));
   Promise.resolve().then(() => { if (same()) return fn(); }).catch(error => {
     if (!same()) return;
     if (error instanceof CharacterError) {
+      if (error.code === "RATE_LIMITED") {
+        const now = Date.now();
+        if (now - (rateNoticeAt.get(player.id) || 0) < 2000) return;
+        rateNoticeAt.set(player.id, now);
+      }
       const text = overrides[error.code] || messages[error.code];
       if (text) notice(text);
       return;
@@ -45,7 +53,7 @@ Events.on("ms:playerReady", ({ playerId, sessionId, userId }) => {
   if (player) openLobby(player, { sessionId, userId });
 });
 Events.on("ms:sessionEnded", ({ sessionId }) => { if (ready) lobby.sessionEnded(sessionId); });
-Events.on("playerDisconnect", player => { if (lobby) lobby.disconnect(player.id).catch(() => console.error("[ms-character] disconnect save failed")); });
+Events.on("playerDisconnect", player => { rateNoticeAt.delete(player.id); if (lobby) lobby.disconnect(player.id).catch(() => console.error("[ms-character] disconnect save failed")); });
 Events.on("playerTeleportComplete", (player, requestId, status) => game?.complete(player.id, "teleport", requestId, status));
 Events.on("playerMapTravelComplete", (player, requestId, status) => game?.complete(player.id, "map", requestId, status));
 Events.onClient("ms-character:sync", player => { if (ready) safe(player, () => lobby.sync(player.id)); });
@@ -67,6 +75,9 @@ Events.on("resourceStart", async name => {
     lobby = createLobby({ repository, config, game, core: Core, emit: (event, payload) => Events.emit(event, payload) });
     if (!Exports.register("Characters", lobby.api)) throw new Error("EXPORT_REGISTRATION_FAILED");
     ready = true;
+    // Retention of soft-deleted characters (M-01): once now, then hourly.
+    const purge = () => repository.purgeDeleted(config.deletedRetentionDays).catch(() => console.error("[ms-character] purge failed"));
+    purge(); purgeTimer = setInterval(purge, 3600000);
     saveTimer = setInterval(() => lobby.saveAll().catch(() => console.error("[ms-character] autosave failed")), config.saveIntervalMs);
     // Players already approved before a (re)start go to the lobby too.
     for (const player of PlayerManager.getAll()) {
@@ -81,6 +92,6 @@ Events.on("resourceStart", async name => {
 });
 Events.on("resourceStop", async name => {
   if (name !== "ms-character") return;
-  ready = false; if (saveTimer) clearInterval(saveTimer);
+  ready = false; if (saveTimer) clearInterval(saveTimer); if (purgeTimer) clearInterval(purgeTimer);
   if (lobby) await lobby.stop(); if (repository) await repository.close();
 });

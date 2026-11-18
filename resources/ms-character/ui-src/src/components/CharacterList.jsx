@@ -23,7 +23,7 @@ export function sortByRecent(characters) {
 //   disabled      a request is in flight (every control disabled)
 //   canCreate     renders the "Criar nova personagem" slot (only while there are free slots)
 //   deleteRefs    ref holding a Map(characterId → "Apagar" button), so App can return focus there
-//   onPreview     focus or selection of a card (lobby:preview); onDelete also runs on the Del key
+//   onPreview     hover, focus or click on a card (lobby:preview); onDelete also runs on the Del key
 export default function CharacterList({ characters, maxCharacters, busyId, disabled, canCreate, deleteRefs, onSelect, onPreview, onDelete, onCreate }) {
   const free = maxCharacters - characters.length;
   return (
@@ -37,7 +37,7 @@ export default function CharacterList({ characters, maxCharacters, busyId, disab
         const dimmed = busyId !== null && !entering;
         return (
           <li key={characterId} className={`char-card${entering ? " is-loading" : ""}${dimmed ? " is-disabled" : ""}`}
-            onFocus={() => onPreview(characterId)}
+            onFocus={() => onPreview(characterId)} onMouseEnter={() => onPreview(characterId)} onClick={() => onPreview(characterId)}
             onKeyDown={event => { if (event.key === "Delete" && !disabled) { event.preventDefault(); onDelete(character); } }}>
             <span className="char-card__crest" aria-hidden="true"><Crest /></span>
             <div>

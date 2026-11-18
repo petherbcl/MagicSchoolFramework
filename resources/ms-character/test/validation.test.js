@@ -7,8 +7,8 @@ const owner = { firstName: "Ana", lastName: "Silva", house: "Ravenclaw" };
 function look(overrides = {}) {
   return {
     format: "arcanemp-look", version: 1, gender: "male", pronoun: "wizard", hood: false,
-    presets: { "Face": "face_01", "Hair/Style": "hair:12#a" }, gear: ["robe.school", "shoes-01"],
-    faceGear: "glasses_round", facialHair: "beard_02", facialHairColor: "#1c1410", wandStyle: "wand/oak",
+    presets: { "Face": "face_01", "HairStyle": "hair_12a" }, gear: ["robe_school", "shoes-01"],
+    faceGear: "glasses_round", facialHair: "beard_02", facialHairColor: "#1c1410", wandStyle: "wand_oak",
     ...overrides,
   };
 }
@@ -186,4 +186,24 @@ test("lookInput returns a detached copy validated after serialization", () => {
 
 test("lookInput requires the server-side character fields", () => {
   assert.throws(() => lookInput(look(), { firstName: "Ana", lastName: "Silva" }), TypeError);
+});
+
+test("lookInput only accepts asset IDs made of letters, digits, _ and - (no paths or URLs)", () => {
+  for (const bad of ["../../etc/passwd", "a/b", "javascript:alert(1)", "a.b", "#abc", "a b", "", "x".repeat(129)]) {
+    rejects(look({ wandStyle: bad }), "wandStyle " + bad);
+    rejects(look({ gear: [bad] }), "gear " + bad);
+    rejects(look({ presets: { skin: bad } }), "preset " + bad);
+  }
+  assert.equal(lookInput(look({ wandStyle: "Wand_Style-01" }), owner).wandStyle, "Wand_Style-01");
+});
+
+test("lookInput refuses oversized shapes before serializing", () => {
+  const many = {}; for (let i = 0; i < 33; i++) many["k" + i] = "x";
+  rejects(look(many));
+  rejects(look({ gear: Array.from({ length: 33 }, (_, i) => "g" + i) }));
+});
+
+test("a name longer than 64 characters is refused without normalizing it", () => {
+  const { characterInput } = require("../server/validation");
+  assert.throws(() => characterInput({ firstName: "a".repeat(100000), lastName: "Silva", house: "Ravenclaw" }), { code: "INVALID_NAME" });
 });

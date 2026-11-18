@@ -37,13 +37,15 @@ class Repository {
     return (await this.pool.query("SELECT * FROM ms_character.characters WHERE user_id=$1 AND deleted_at IS NULL ORDER BY last_played_at DESC NULLS LAST, id",
       [publicId(userId)])).rows.map(row => this.map(row));
   }
-  async create(userId, input, maxCharacters) {
+  async create(userId, input, maxCharacters, maxCreationsPerDay = 5) {
     const value = characterInput(input);
     // Name/house errors win over look errors; the look is validated and sanitised before any DB work.
     const state = { inventory: [], look: lookInput(input.look, value), location: null };
     return this.transaction(async db => {
       // Locking the account row serialises concurrent creations against the limit.
       check((await db.query("SELECT id FROM ms_core.ms_users WHERE id=$1 FOR UPDATE", [publicId(userId)])).rowCount, "USER_NOT_FOUND");
+      // Cap on creations in 24 h, deleted ones included: a create/delete loop must not grow the table (M-01).
+      check(Number((await db.query("SELECT count(*) AS n FROM ms_character.characters WHERE user_id=$1 AND created_at > now() - interval '24 hours'", [userId])).rows[0].n) < maxCreationsPerDay, "CREATE_COOLDOWN");
       check(Number((await db.query("SELECT count(*) AS n FROM ms_character.characters WHERE user_id=$1 AND deleted_at IS NULL", [userId])).rows[0].n) < maxCharacters, "CHARACTER_LIMIT");
       const row = (await db.query("INSERT INTO ms_character.characters(user_id,first_name,last_name,house,state) VALUES($1,$2,$3,$4,$5) RETURNING *",
         [userId, value.firstName, value.lastName, value.house, json(state, 2 * 1024 * 1024)])).rows[0];
@@ -52,10 +54,12 @@ class Repository {
       return this.map(row);
     });
   }
-  async touch(id) { await this.pool.query("UPDATE ms_character.characters SET last_played_at=now() WHERE id=$1", [publicId(id)]); }
+  async touch(id, userId) {
+    await this.pool.query("UPDATE ms_character.characters SET last_played_at=now() WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL", [publicId(id), publicId(userId)]);
+  }
   async save(id, userId, expectedVersion, state) {
     const result = await this.pool.query(`UPDATE ms_character.characters SET state=$1,version=version+1,updated_at=now()
-      WHERE id=$2 AND user_id=$3 AND version=$4 RETURNING *`, [json(state, 2 * 1024 * 1024), publicId(id), publicId(userId), expectedVersion]);
+      WHERE id=$2 AND user_id=$3 AND version=$4 AND deleted_at IS NULL RETURNING *`, [json(state, 2 * 1024 * 1024), publicId(id), publicId(userId), expectedVersion]);
     check(result.rowCount === 1, "REVISION_CONFLICT"); return this.map(result.rows[0]);
   }
   // Soft delete by the owner only; the audit row is written in the same transaction.
@@ -68,6 +72,15 @@ class Repository {
       await db.query("INSERT INTO ms_core.ms_audit_log(actor,action,user_id,details) VALUES($1,'character.deleted',$2,$3)",
         ["user:" + owner, owner, JSON.stringify({ characterId })]);
     });
+  }
+  // Trace of a refused ownership check (L-06): someone probing character IDs of other accounts.
+  async audit(action, userId, details) {
+    await this.pool.query("INSERT INTO ms_core.ms_audit_log(actor,action,user_id,details) VALUES($1,$2,$3,$4)",
+      ["user:" + publicId(userId), action, publicId(userId), JSON.stringify(details)]);
+  }
+  // Retention (M-01): removes characters deleted more than `days` days ago. Returns how many.
+  async purgeDeleted(days) {
+    return (await this.pool.query("DELETE FROM ms_character.characters WHERE deleted_at IS NOT NULL AND deleted_at < now() - make_interval(days => $1::int)", [days])).rowCount;
   }
   async close() { if (!this.closed) { this.closed = true; await this.pool.end(); } }
 }

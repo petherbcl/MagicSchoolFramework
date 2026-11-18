@@ -22,7 +22,7 @@ function json(value, maxBytes) {
 function characterInput(value) {
   check(value && typeof value === "object", "INVALID_CHARACTER");
   const name = input => {
-    check(typeof input === "string", "INVALID_NAME");
+    check(typeof input === "string" && input.length <= 64, "INVALID_NAME"); // before trim/normalize: never work on a huge string
     const normalized = input.trim().normalize("NFC");
     check(normalized.length >= 2 && normalized.length <= 32 && /^[\p{L}][\p{L}\p{M}' -]*$/u.test(normalized), "INVALID_NAME");
     return normalized;
@@ -32,7 +32,8 @@ function characterInput(value) {
 }
 // LookJson (#api-client-lookjson), plan §4.3. Every key is either allowed, stripped or imposed by the server.
 const LOOK_MAX_BYTES = 16 * 1024;
-const LOOK_ID = /^[\w.\-/:#]+$/;
+// IDs of the game's assets (HairMale001, GA_Back_014, M_Facial_zBase_FullBeard): no path or URL characters (L-04).
+const LOOK_ID = /^[A-Za-z0-9_-]+$/;
 const LOOK_STRIPPED = Object.freeze(["scale", "scaleMode", "boneScales"]);
 // Measured in game (findings §8): setVoice takes integers, tone is clamped to 0..1 and pitch is not clamped at all.
 // The pitch limit is ours (must match VOICE_PITCH_MAX in ui-src/src/voice.js).
@@ -65,6 +66,8 @@ const LOOK_FIELDS = Object.freeze({
 function lookInput(value, { firstName, lastName, house }) {
   if (![firstName, lastName, house].every(item => typeof item === "string")) throw new TypeError("lookInput requires the character's firstName, lastName and house");
   check(isPlainObject(value), "INVALID_LOOK");
+  // Cheap shape checks before serializing a possibly huge object (L-01).
+  check(Object.keys(value).length <= 32 && (!Array.isArray(value.gear) || value.gear.length <= 32), "INVALID_LOOK");
   let look;
   // json() applies the forbidden-key, finite-number and size guards. Validating the re-parsed copy means
   // getters, toJSON and proxies cannot make the checked value differ from what gets serialized.

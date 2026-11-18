@@ -62,3 +62,14 @@ test("restore stops when its lobby is cancelled", async () => {
   game.cancel({ token: 9, player });
   await assert.rejects(restoring, { code: "SESSION_EXPIRED" });
 });
+
+test("a look the game rejects does not stop the restore and the stored look is kept on capture (L-07)", async () => {
+  const game = createGameAdapter(config), { player } = nativePlayer();
+  player.setLook = (look, done) => done(new Error("unknown asset"));
+  player.getLook = () => ({ marker: "default" });
+  const stored = { marker: "stored" };
+  const restoring = game.apply(player, { house: "Ravenclaw", state: { inventory: [], look: stored, location: null } }, () => true, 3);
+  await new Promise(resolve => setImmediate(resolve));
+  game.complete(1, "teleport", 42, 0); await restoring;
+  assert.deepEqual(game.capture(player, { look: stored }).look, stored, "the default look must not overwrite the stored one");
+});

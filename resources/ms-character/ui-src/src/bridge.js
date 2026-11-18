@@ -24,6 +24,8 @@ import { useEffect, useState } from "react";
 //                                                            client sends creator:schema again.
 //   "creator:voice"   { tone: 0 | 1, pitch: -10..10 }       Creator.setVoice after 80 ms; also kept for the created look
 //   "creator:voice:preview" null                           Creator.previewVoice() (after the change is applied); sent with every voice change
+//   "model:rotate"    { delta }                              CreatorPreview.rotate(delta) (degrees, clamped by the client);
+//                                                            buttons repeat while held, dragging over the avatar column too.
 //   "creator:pronoun" { pronoun: "witch" | "wizard" }       Kept by the client and added to look.pronoun on create
 //                                                            (independent of the body).
 //
@@ -97,6 +99,7 @@ const mockHandlers = {
   // Accepted without effect: in the game they drive the creator camera and the local look preview.
   "camera:frame": () => {},
   "lobby:preview": () => {},
+  "model:rotate": () => {},
   "creator:begin": () => {
     const session = creator = initialCreatorState();
     // The real schema is null until the first creatorChanged, ~250 ms after begin().

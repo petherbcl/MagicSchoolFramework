@@ -220,7 +220,7 @@ test("characters map lastPlayedAt as an ISO string or null", async t => {
   const f = await fixture(t, {}, { maxCharacters: 2 }); await f.join();
   const never = await f.lobby.create(1, ana); f.advance(1000);
   const played = await f.lobby.create(1, { ...ana, firstName: "Rita" });
-  await f.repository.touch(played.characterId);
+  await f.repository.touch(played.characterId, "1");
   assert.equal((await f.repository.get(never.characterId)).lastPlayedAt, null);
   const { lastPlayedAt } = await f.repository.get(played.characterId);
   assert.equal(typeof lastPlayedAt, "string"); assert.equal(new Date(lastPlayedAt).toISOString(), lastPlayedAt);
@@ -454,4 +454,64 @@ test("version 0.2.0 matches package.json, api.version and the README", async t =
   const fs = require("node:fs"), path = require("node:path");
   const pkg = require("../package.json"), readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
   assert.equal(f.lobby.api.version, "0.2.0"); assert.equal(pkg.version, "0.2.0"); assert.match(readme, /versão 0\.2\.0/);
+});
+
+test("creations are capped per account in 24 h, deleted characters included (M-01)", async t => {
+  const f = await fixture(t, {}, { maxCharacters: 1, maxCreationsPerDay: 2 }); await f.join();
+  const first = await f.lobby.create(1, ana); f.advance(1000);
+  await f.lobby.delete(1, first.characterId); f.advance(1000);
+  const second = await f.lobby.create(1, ana); f.advance(1000);
+  await f.lobby.delete(1, second.characterId); f.advance(1000);
+  await assert.rejects(f.lobby.create(1, ana), { code: "CREATE_COOLDOWN" });
+  assert.equal((await f.repository.list("1")).length, 0);
+  // Older creations stop counting.
+  await bootstrap.pool.query("UPDATE ms_character.characters SET created_at = now() - interval '25 hours'");
+  f.advance(1000);
+  assert.equal((await f.lobby.create(1, ana)).firstName, "Ana");
+});
+
+test("purgeDeleted removes only characters deleted longer ago than the retention (M-01)", async t => {
+  const f = await fixture(t, {}, { maxCharacters: 3 }); await f.join();
+  const old = await f.lobby.create(1, ana); f.advance(1000);
+  const recent = await f.lobby.create(1, { ...ana, firstName: "Rita" }); f.advance(1000);
+  const active = await f.lobby.create(1, { ...ana, firstName: "Eva" }); f.advance(1000);
+  await f.lobby.delete(1, old.characterId); f.advance(1000);
+  await f.lobby.delete(1, recent.characterId);
+  await bootstrap.pool.query("UPDATE ms_character.characters SET deleted_at = now() - interval '31 days' WHERE id=$1", [old.characterId]);
+  assert.equal(await f.repository.purgeDeleted(30), 1);
+  assert.equal(await f.repository.get(old.characterId, { includeDeleted: true }), null);
+  assert.ok(await f.repository.get(recent.characterId, { includeDeleted: true }));
+  assert.ok(await f.repository.get(active.characterId));
+});
+
+test("deleting or selecting a character of another account leaves an audit trace (L-06)", async t => {
+  const f = await fixture(t, {}, { maxCharacters: 2 }); await f.join();
+  const mine = await f.lobby.create(1, ana);
+  const other = (await bootstrap.pool.query("INSERT INTO ms_character.characters(user_id,first_name,last_name,house) SELECT id,'Zé','Costa','Ravenclaw' FROM ms_core.ms_users WHERE id=2 RETURNING id")).rows[0];
+  assert.ok(other, "the fixture has a second account");
+  f.advance(1000);
+  await assert.rejects(f.lobby.delete(1, String(other.id)), { code: "CHARACTER_NOT_FOUND" }); f.advance(1000);
+  await assert.rejects(f.lobby.select(1, String(other.id)), { code: "CHARACTER_NOT_FOUND" });
+  const rows = (await bootstrap.pool.query("SELECT actor,action,details FROM ms_core.ms_audit_log WHERE action LIKE 'character.%_denied' ORDER BY id")).rows;
+  assert.deepEqual(rows.map(row => [row.actor, row.action, row.details.characterId]), [
+    ["user:1", "character.delete_denied", String(other.id)], ["user:1", "character.select_denied", String(other.id)]]);
+  assert.ok(mine);
+});
+
+test("sync is ignored when repeated within 500 ms (L-02)", async t => {
+  const f = await fixture(t); await f.join();
+  const before = f.sent.length;
+  f.lobby.sync(1); f.lobby.sync(1); f.lobby.sync(1);
+  assert.equal(f.sent.length - before, 1);
+  f.advance(500); f.lobby.sync(1);
+  assert.equal(f.sent.length - before, 2);
+});
+
+test("save and touch do not act on a soft-deleted character (L-07)", async t => {
+  const f = await fixture(t); await f.join();
+  const { characterId } = await f.lobby.create(1, ana); f.advance(1000);
+  await f.lobby.delete(1, characterId);
+  await f.repository.touch(characterId, "1");
+  assert.equal((await f.repository.get(characterId, { includeDeleted: true })).lastPlayedAt, null);
+  await assert.rejects(f.repository.save(characterId, "1", 0, { inventory: [], look: null, location: null }), { code: "REVISION_CONFLICT" });
 });
