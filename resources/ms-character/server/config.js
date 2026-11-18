@@ -33,7 +33,8 @@ function loadConfig(env = process.env, options = {}) {
     // Each lobby gets its own private virtual world; ms-core quarantine uses 3000000000+.
     lobbyWorldBase: 3100000000,
     // Where the player waits while choosing, and where a new character first appears (Overland).
-    lobby: { position: { x: 366784, y: -461527, z: -82610 }, yaw: -130 },
+    // Chosen by the user with /pos (docs/ms-character-runtime-findings.md §4.1). Note: player.hold has no yaw option.
+    lobby: { position: { x: 349817, y: -466133, z: -84908 }, yaw: 123 },
     spawn: { position: { x: 366784, y: -461527, z: -82610 }, yaw: -130 },
   });
 }

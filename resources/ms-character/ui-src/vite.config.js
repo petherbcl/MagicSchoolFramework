@@ -30,6 +30,8 @@ export default defineConfig({
     cssCodeSplit: false,
     target: "chrome100",
     assetsDir: "assets",
+    // Never inline assets as data: URIs (the font must ship as a file for font-src 'self').
+    assetsInlineLimit: 0,
     rollupOptions: { output: { format: "iife", inlineDynamicImports: true } },
   },
 });

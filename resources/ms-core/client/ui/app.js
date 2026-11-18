@@ -16,11 +16,17 @@ window.addEventListener("session", event => {
   byId("form-url").value = typeof state.formUrl === "string" ? state.formUrl : "";
   byId("form-link").hidden = !state.formUrl;
   if (state.status === "identifying" && !registrationSent.has(state.sessionId)) {
-    try {
-      const credential = localStorage.getItem(storageKey(state.serverKey));
-      registrationSent.add(state.sessionId);
-      send("register", { sessionId: state.sessionId, credential });
-    } catch { byId("notice").textContent = "Não foi possível ler a chave local. Verifica o armazenamento do cliente ou contacta a equipa."; }
+    registrationSent.add(state.sessionId);
+    // CEF storage can read as empty right after the game starts. Registering with a null key on an
+    // account that already holds one is refused, so re-read once before declaring a new client.
+    const attempt = retry => {
+      try {
+        const credential = localStorage.getItem(storageKey(state.serverKey));
+        if (credential === null && retry > 0) { setTimeout(() => attempt(retry - 1), 1500); return; }
+        send("register", { sessionId: state.sessionId, credential });
+      } catch { byId("notice").textContent = "Não foi possível ler a chave local. Verifica o armazenamento do cliente ou contacta a equipa."; }
+    };
+    attempt(1);
   }
 });
 window.addEventListener("credential", event => {

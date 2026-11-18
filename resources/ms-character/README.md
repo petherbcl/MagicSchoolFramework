@@ -1,6 +1,6 @@
 # ms-character
 
-Lobby de personagens do MagicSchoolRP (versão 0.1.0). Depende do [ms-core](../ms-core/README.md): o jogador só chega aqui depois de a conta estar aprovada e a chave local verificada.
+Lobby de personagens do MagicSchoolRP (versão 0.2.0). Depende do [ms-core](../ms-core/README.md): o jogador só chega aqui depois de a conta estar aprovada e a chave local verificada.
 
 ## Fluxo
 
@@ -11,6 +11,9 @@ Lobby de personagens do MagicSchoolRP (versão 0.1.0). Depende do [ms-core](../m
 3. Ao escolher, o servidor confirma que a personagem pertence à conta e restaura-a: viagem para Overland, inventário, look, casa e posição guardada. Uma personagem nova aparece no spawn.
 4. O jogador sai do lobby para o mundo 0 e o recurso emite `ms:characterReady`.
 5. A personagem é guardada automaticamente (`MS_SAVE_INTERVAL_SECONDS`) e quando o jogador sai. Os saves usam controlo de versão, por isso um save desatualizado é recusado.
+   - **Posição:** só se restauram posições do Overland. Fora do Overland (castelo, masmorras, durante cargas) o save mantém a última posição Overland conhecida.
+   - **Falhas no autosave:** uma falha transitória (BD, captura nativa) é repetida no tick seguinte. O jogador só é desligado à 3.ª falha seguida.
+   - **Conflito de versão:** desliga o jogador de imediato, porque a personagem foi alterada fora desta sessão (edição na BD, sessão duplicada). A cópia em memória está desatualizada e não deve sobrescrever a da BD.
 
 Se o restauro nativo falhar, o jogador é desligado, porque o estado ficaria a meio. Nesse caso não se emite `ms:characterReady` e não se grava nada.
 
@@ -35,6 +38,17 @@ Uma BD criada antes da versão 0.4.0 do ms-core tem as personagens em `ms_core.m
 ```sql
 INSERT INTO ms_character.characters(user_id,first_name,last_name,house,state,version,created_at,updated_at)
 SELECT user_id,first_name,last_name,house,state,version,created_at,updated_at FROM ms_core.ms_characters ORDER BY id;
+```
+
+### Recuperar uma personagem apagada
+
+Apagar uma personagem é um soft delete: a linha fica com `deleted_at` preenchido, deixa de aparecer no lobby, deixa de contar para o limite e fica registada em `ms_core.ms_audit_log` (`character.deleted`). Um admin recupera-a com esta SQL, substituindo `$1` pelo ID da personagem e `<nome>` pelo seu nome:
+
+```sql
+-- Confirmar primeiro que a conta tem vaga: as personagens ativas têm de ser menos do que MS_MAX_CHARACTERS.
+UPDATE ms_character.characters SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL;
+INSERT INTO ms_core.ms_audit_log(actor, action, user_id, details)
+  SELECT 'admin:<nome>', 'character.restored', user_id, jsonb_build_object('characterId', id::text) FROM ms_character.characters WHERE id = $1;
 ```
 
 ## Integração

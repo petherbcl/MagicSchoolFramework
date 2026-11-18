@@ -1,6 +1,6 @@
 {
   "name": "ms-character",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "MagicSchoolRP character lobby: selection, creation and persistence per ms-core account",
   "engines": {

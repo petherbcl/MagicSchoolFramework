@@ -81,12 +81,15 @@ function createGameAdapter(config, { setTimeout: later = setTimeout, clearTimeou
       player.setFastTravelEnabled(lobby.previous.fastTravel);
     },
     capture(player, previous) {
+      // apply() can only restore Overland positions, so inside other areas (castle, dungeons, during
+      // loads) keep the last Overland position instead of overwriting it with one we cannot use.
       const location = player.location();
-      const finite = location && [location.x, location.y, location.z, location.yaw].every(Number.isFinite);
+      const usable = location?.areaId === "Overland" && [location.x, location.y, location.z, location.yaw].every(Number.isFinite);
+      const kept = previous.location?.areaId === "Overland" ? previous.location : null;
       return clone({
         inventory: player.inventory.list(),
         look: player.getLook() || previous.look || null,
-        location: finite ? { areaId: location.areaId, x: location.x, y: location.y, z: location.z, yaw: location.yaw } : previous.location || null,
+        location: usable ? { areaId: location.areaId, x: location.x, y: location.y, z: location.z, yaw: location.yaw } : kept,
       });
     },
     complete(playerId, type, requestId, status) {

@@ -1,16 +1,78 @@
 @import "tailwindcss";
+@import "./components.css";
 
-/* MagicSchoolRP palette, shared by every lobby screen (bg-ink, text-gold, border-brass...). */
-@theme {
-  --color-ink: #141e27;
-  --color-night: #0c151d;
-  --color-parchment: #eee8d9;
-  --color-gold: #d5b87b;
-  --color-brass: #756344;
-  --color-mist: #b4b9bd;
-  --color-ember: #f2c19a;
-  --font-serif: Georgia, "Times New Roman", serif;
+/* Cinzel (SIL Open Font License 1.1, see assets/fonts/OFL.txt), bundled locally: the CSP allows font-src 'self' only. */
+@font-face {
+  font-family: "Cinzel";
+  src: url("./assets/fonts/cinzel-latin-wght-normal.woff2") format("woff2");
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
 }
 
+/* MagicSchoolRP design tokens (docs/design/design-tokens.css). The old names
+   ink/night/parchment/gold/brass/mist/ember are kept so existing classes keep working. */
+@theme {
+  --color-night: #0B141C;
+  --color-night-mid: #0F1B25;
+  --color-ink: #13202B;
+  --color-ink-raised: #1A2A37;
+  --color-parchment: #EEE8D9;
+  --color-mist: #B4B9BD;
+  --color-fog: #8A949C;
+  --color-gold: #D5B87B;
+  --color-gold-bright: #E8CF96;
+  --color-gold-deep: #B89A5E;
+  --color-brass: #857150;
+  --color-arcane: #86D3E3;
+  --color-focus: #F3E3B5;
+  --color-ember: #F08A78;
+  --color-amber: #E6B65C;
+  --color-verdant: #8FCFA4;
+  --color-crimson: #8E2A22;
+  --color-crimson-bright: #A3342A;
+  --color-crimson-deep: #6E1D19;
+  --color-scrim: rgb(6 11 16 / 0.78);
+
+  --font-display: "Cinzel", Georgia, "Times New Roman", serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+
+  --text-eyebrow: 0.75rem;
+  --text-title: 2rem;
+  --text-display: 2.5rem;
+
+  --radius-engraved: 2px;
+  --radius-card: 4px;
+
+  --shadow-glow-gold: 0 0 0 1px rgb(232 207 150 / 0.55), 0 0 14px rgb(213 184 123 / 0.35);
+  --shadow-glow-arcane: 0 0 0 1px rgb(134 211 227 / 0.6), 0 0 14px rgb(134 211 227 / 0.35);
+  --shadow-panel: 0 16px 32px -12px rgb(4 8 12 / 0.7);
+
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-enter: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  --animate-shimmer: shimmer 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  --animate-spin-slow: spin 0.9s linear infinite;
+  --animate-pulse-dot: pulse-dot 1.2s ease-in-out infinite;
+  @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  @keyframes pulse-dot { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+}
+
+/* Fluid root: 16px up to 1920px wide, 20px at 2560px. Everything else is rem. */
+html { font-size: clamp(16px, 0.625vw + 4px, 20px); }
 html, body, #root { height: 100%; }
-body { margin: 0; background: rgb(9 16 22 / 0.94); color: var(--color-parchment); font-family: var(--font-serif); }
+/* Transparent: the panel paints its own background and the avatar anchor must show the game. */
+body { margin: 0; background: transparent; color: var(--color-parchment); font-family: var(--font-serif); }
+
+/* Several components set `display`, which would otherwise override the hidden attribute. */
+[hidden] { display: none !important; }
+
+/* Reduced motion: honour the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

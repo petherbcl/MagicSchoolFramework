@@ -45,6 +45,16 @@ test("a new character without location goes to the configured spawn", async () =
   game.complete(1, "teleport", 5, 0); await restoring;
   assert.deepEqual(target, config.spawn.position);
 });
+test("capture keeps the last Overland position outside Overland or while loading", () => {
+  const game = createGameAdapter(config), { player } = nativePlayer();
+  const previous = { location: { areaId: "Overland", x: 9, y: 8, z: 7, yaw: 6 } };
+  assert.deepEqual(game.capture(player, previous).location, { areaId: "Overland", x: 1, y: 2, z: 3, yaw: 4 });
+  player.location = () => ({ areaId: "Hogwarts", x: 1, y: 2, z: 3, yaw: 4 });
+  assert.deepEqual(game.capture(player, previous).location, previous.location);
+  player.location = () => null;
+  assert.deepEqual(game.capture(player, previous).location, previous.location);
+  assert.equal(game.capture(player, { location: { areaId: "Hogwarts", x: 1, y: 2, z: 3, yaw: 4 } }).location, null);
+});
 test("restore stops when its lobby is cancelled", async () => {
   const game = createGameAdapter(config), { player } = nativePlayer();
   player.inventory.replace = () => {};

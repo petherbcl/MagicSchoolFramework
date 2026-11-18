@@ -11,17 +11,28 @@ const Core = { Users: {
   isReady: id => Boolean(Exports.get("ms-core", "Core")?.Users.isReady(id)),
 } };
 const messages = { INVALID_NAME: "Usa nomes com 2 a 32 letras.", INVALID_HOUSE: "Escolhe uma casa válida.",
-  INVALID_CHARACTER: "Dados de personagem inválidos.", CHARACTER_LIMIT: "Atingiste o limite de personagens.",
+  INVALID_CHARACTER: "Dados de personagem inválidos.", INVALID_LOOK: "Aparência inválida. Volta a tentar.",
+  CHARACTER_LIMIT: "Atingiste o limite de personagens. Apaga uma personagem para criares outra.",
   CHARACTER_NOT_FOUND: "A personagem não pertence à tua conta.", INVALID_ID: "Personagem inválida.",
   RATE_LIMITED: "Aguarda antes de repetir.", INVALID_STATE: "Aguarda a etapa atual." };
+const DELETE_FAILED = "Não foi possível apagar a personagem. Tenta de novo; se o problema persistir, contacta a equipa.";
+// Deleting never touches the native state, so its unexpected failures are a notice instead of a kick.
+const deleteFailures = Object.freeze({ overrides: Object.freeze({ INVALID_STATE: DELETE_FAILED }), unexpected: DELETE_FAILED });
 
-// Errors with a known code become a notice; anything else kicks (the native state is unknown).
-function safe(player, fn) {
+// Errors with a known code become a notice (per-operation overrides first). Anything else kicks, because the
+// native state is unknown, unless the operation supplies its own `unexpected` notice.
+function safe(player, fn, { overrides = {}, unexpected = null } = {}) {
   const same = lobby?.guard(player.id) || (() => false);
+  const notice = text => player.emit("ms-character:notice", JSON.stringify({ text }));
   Promise.resolve().then(() => { if (same()) return fn(); }).catch(error => {
     if (!same()) return;
-    if (error instanceof CharacterError && messages[error.code]) player.emit("ms-character:notice", JSON.stringify({ text: messages[error.code] }));
-    else if (!(error instanceof CharacterError)) { console.error("[ms-character] operation failed: " + (error.code || error.name)); player.kick("Erro na seleção de personagens. Tenta novamente."); }
+    if (error instanceof CharacterError) {
+      const text = overrides[error.code] || messages[error.code];
+      if (text) notice(text);
+      return;
+    }
+    console.error("[ms-character] operation failed: " + (error.code || error.name));
+    if (unexpected) notice(unexpected); else player.kick("Erro na seleção de personagens. Tenta novamente.");
   });
 }
 function openLobby(player, session) {
@@ -41,6 +52,9 @@ Events.onClient("ms-character:sync", player => { if (ready) safe(player, () => l
 Events.onClient("ms-character:create", (player, input) => { if (ready) safe(player, () => lobby.create(player.id, input)); });
 Events.onClient("ms-character:select", (player, input) => {
   if (ready && input && typeof input.characterId === "string" && input.characterId.length <= 19) safe(player, () => lobby.select(player.id, input.characterId));
+});
+Events.onClient("ms-character:delete", (player, input) => {
+  if (ready && input && typeof input.characterId === "string" && input.characterId.length <= 19) safe(player, () => lobby.delete(player.id, input.characterId), deleteFailures);
 });
 Events.on("resourceStart", async name => {
   if (name !== "ms-character") return;
