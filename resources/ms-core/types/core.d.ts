@@ -3,7 +3,7 @@ export type PublicId = string;
 export type SessionStatus = "connecting" | "identifying" | "registering" | "awaitingCredentialStorage" |
   "checkingAccess" | "awaitingApproval" | "waitingForWorld" | "ready" | "closed";
 export type AllowlistStatus = "pending" | "approved" | "denied";
-export interface User { userId: PublicId; allowlist: AllowlistStatus; metadata: Record<string, unknown>; roles: string[]; createdAt: string; lastSeenAt: string; }
+export interface User { userId: PublicId; allowlist: AllowlistStatus; metadata: Record<string, unknown>; createdAt: string; lastSeenAt: string; }
 export interface Session {
   /** Numeric database ID; null only while the connecting session awaits its INSERT. */
   sessionId: PublicId | null; playerId: number; userId: PublicId | null;
@@ -12,7 +12,7 @@ export interface Session {
   /** True once a resource called Players.enterGame for this session. */
   inGame: boolean; characterId: PublicId | null;
 }
-/** In-memory record of a player that entered the game with a character. `roles` follow the polled user row. */
+/** In-memory record of a player that entered the game with a character. `roles` are the character's roles (always includes "player") and follow the polled database rows. */
 export interface GamePlayer { playerId: number; userId: PublicId; sessionId: PublicId; characterId: PublicId; roles: string[]; enteredAt: string; }
 /** ms:playerEnteredGame payload (same as GamePlayer). ms:playerLeftGame adds the session end `reason`. */
 export type PlayerLeftGame = GamePlayer & { reason: string };
@@ -40,7 +40,7 @@ export interface Core {
     approve(userId: PublicId, actorPlayerId: number): Promise<User>;
     deny(userId: PublicId, reason: string, actorPlayerId: number): Promise<User>;
   };
-  readonly Roles: { set(userId: PublicId, role: string, enabled: boolean, actorPlayerId: number): Promise<User>; };
+  readonly Roles: { set(characterId: PublicId, role: string, enabled: boolean, actorPlayerId: number): Promise<string[]>; };
   readonly Bans: {
     add(userId: PublicId, reason: string, expiresAt: number | null, actorPlayerId: number): Promise<PublicId>;
     revoke(userId: PublicId, actorPlayerId: number): Promise<void>;

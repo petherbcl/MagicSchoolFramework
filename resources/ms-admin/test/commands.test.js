@@ -11,6 +11,10 @@ function setup(roles = ["admin"], role = "admin") {
   const game = {
     hide: () => { const previous = { visible: log.visible, collidable: true }; log.visible = false; return previous; },
     show: (_p, previous) => { log.visible = previous.visible; },
+    startFx: () => { log.fx = true; return { fx: "k" }; },
+    stopFx: () => { log.fx = false; },
+    fxCatalog: filter => [{ name: "Smoke", path: "/Game/VFX/Smoke" }, { name: "Fire", path: "/Game/VFX/Fire" }]
+      .filter(entry => !filter || entry.name.toLowerCase().includes(filter)),
     emit: (_p, name, payload) => log.emits.push([name, payload]),
     position: () => ({ x: 1.234, y: -2, z: 3.999, yaw: 90 }),
   };
@@ -23,20 +27,32 @@ test("coords prints x, y, z, w", () => {
   assert.equal(admin.handle(player, "coords"), true);
   assert.deepEqual(log.chat, ["x: 1.23, y: -2, z: 4, w: 90"]);
 });
-test("np toggles noclip and restores visibility", () => {
+test("nc toggles noclip and restores visibility", () => {
   const { admin, player, log } = setup();
-  admin.handle(player, "np");
+  admin.handle(player, "nc");
   assert.equal(admin.isNoclip(1), true);
   assert.equal(log.visible, false);
   assert.deepEqual(log.emits.at(-1), ["ms-admin:noclip", { enabled: true }]);
-  admin.handle(player, "np");
+  admin.handle(player, "nc");
   assert.equal(admin.isNoclip(1), false);
   assert.equal(log.visible, true);
   assert.deepEqual(log.emits.at(-1), ["ms-admin:noclip", { enabled: false }]);
 });
+test("nc starts and stops the effect", () => {
+  const { admin, player, log } = setup();
+  admin.handle(player, "nc");
+  assert.equal(log.fx, true);
+  admin.handle(player, "nc");
+  assert.equal(log.fx, false);
+});
+test("fxlist filters the catalog", () => {
+  const { admin, player, log } = setup();
+  admin.handle(player, "fxlist", ["smoke"]);
+  assert.deepEqual(log.chat, ["1 efeitos (a mostrar 1):", "/Game/VFX/Smoke"]);
+});
 test("players without the configured role are ignored", () => {
   const { admin, player, log } = setup(["moderator"]);
-  assert.equal(admin.handle(player, "np"), false);
+  assert.equal(admin.handle(player, "nc"), false);
   assert.equal(admin.handle(player, "coords"), false);
   assert.deepEqual(log.chat, []);
 });
@@ -53,7 +69,7 @@ test("unknown commands and players outside the game are ignored", () => {
 });
 test("revalidate turns noclip off when the role is lost", () => {
   const { admin, player, players, log } = setup();
-  admin.handle(player, "np");
+  admin.handle(player, "nc");
   players.get(1).roles = [];
   admin.revalidate(() => player);
   assert.equal(admin.isNoclip(1), false);
@@ -63,4 +79,7 @@ test("config reads MS_ADMIN_ROLE and rejects bad values", () => {
   assert.equal(loadConfig({}, { envFile: null }).role, "admin");
   assert.equal(loadConfig({ MS_ADMIN_ROLE: "staff" }, { envFile: null }).role, "staff");
   assert.throws(() => loadConfig({ MS_ADMIN_ROLE: "a b" }, { envFile: null }));
+  assert.equal(loadConfig({}, { envFile: null }).noclipFxEnabled, true);
+  assert.equal(loadConfig({ MS_ADMIN_NOCLIP_FX_ENABLED: "false" }, { envFile: null }).noclipFxEnabled, false);
+  assert.throws(() => loadConfig({ MS_ADMIN_NOCLIP_FX_ENABLED: "maybe" }, { envFile: null }));
 });

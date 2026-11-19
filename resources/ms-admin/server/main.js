@@ -10,12 +10,13 @@ const chat = (player, text) => { try { Chat.sendToPlayer(player, text, { author:
 
 Events.on("resourceStart", name => {
   if (name !== "ms-admin") return;
-  admin = createAdmin({ config: loadConfig(), core, game: createGameAdapter(), chat });
+  const config = loadConfig();
+  admin = createAdmin({ config, core, game: createGameAdapter(config), chat });
   timer = setInterval(() => admin.revalidate(id => PlayerManager.getById(id)), 2000);
   console.log("[ms-admin] started");
 });
 Events.on("resourceStop", name => { if (name === "ms-admin" && timer) { clearInterval(timer); timer = null; } });
-Events.on("chatCommand", (player, message, command) => { if (admin) admin.handle(player, String(command).toLowerCase()); });
+Events.on("chatCommand", (player, message, command, args) => { if (admin) admin.handle(player, String(command).toLowerCase(), Array.isArray(args) ? args : []); });
 Events.on("ms:playerLeftGame", ({ playerId }) => {
   const player = PlayerManager.getById(playerId);
   if (admin && player) admin.clear(player);

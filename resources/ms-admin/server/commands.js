@@ -17,17 +17,25 @@ function createAdmin({ config, core, game, chat }) {
   function turnOff(player) {
     const state = noclip.get(player.id);
     noclip.delete(player.id);
+    game.stopFx(player, state && state.fx);
     game.show(player, state && state.previous);
     game.emit(player, NOCLIP_EVENT, { enabled: false });
   }
 
   const commands = {
-    np(player) {
+    nc(player) {
       if (noclip.has(player.id)) { turnOff(player); chat(player, "Noclip desligado."); return; }
       const entry = core.Players.get(player.id);
-      noclip.set(player.id, { sessionId: entry.sessionId, previous: game.hide(player) });
+      noclip.set(player.id, { sessionId: entry.sessionId, previous: game.hide(player), fx: game.startFx(player) });
       game.emit(player, NOCLIP_EVENT, { enabled: true });
       chat(player, "Noclip ligado.");
+    },
+    // /fxlist [filter]: lists Fx.catalog() entries so staff can pick MS_ADMIN_NOCLIP_FX.
+    fxlist(player, args) {
+      const list = game.fxCatalog(args[0]);
+      if (!list.length) { chat(player, "Nenhum efeito encontrado."); return; }
+      chat(player, `${list.length} efeitos (a mostrar ${Math.min(list.length, 10)}):`);
+      for (const entry of list.slice(0, 10)) chat(player, entry.path);
     },
     coords(player) {
       const at = game.position(player);
@@ -38,10 +46,10 @@ function createAdmin({ config, core, game, chat }) {
 
   return {
     // True when the command exists and ran. Unauthorized players get no reply, so staff commands are not advertised.
-    handle(player, command) {
+    handle(player, command, args = []) {
       if (!Object.hasOwn(commands, command)) return false;
       if (!authorized(player.id)) return false;
-      commands[command](player);
+      commands[command](player, args);
       return true;
     },
     isNoclip: playerId => noclip.has(playerId),

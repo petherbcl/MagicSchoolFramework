@@ -19,9 +19,9 @@ module.exports = Object.freeze([
  token_hash VARCHAR(64) ${BIN} NOT NULL PRIMARY KEY,user_id BIGINT NOT NULL,created_at ${TS},revoked_at DATETIME(3) NULL,
  CONSTRAINT ms_user_credentials_user_fk FOREIGN KEY (user_id) REFERENCES ms_users(id)
 ) ${TABLE}`,
-  `CREATE TABLE IF NOT EXISTS ms_user_roles (
- user_id BIGINT NOT NULL,role VARCHAR(32) ${BIN} NOT NULL,PRIMARY KEY(user_id,role),
- CONSTRAINT ms_user_roles_user_fk FOREIGN KEY (user_id) REFERENCES ms_users(id)
+  // Roles belong to characters (ms_characters lives in ms-character, so no foreign key here). "player" is implicit.
+  `CREATE TABLE IF NOT EXISTS ms_character_roles (
+ character_id BIGINT NOT NULL,role VARCHAR(32) ${BIN} NOT NULL,PRIMARY KEY(character_id,role)
 ) ${TABLE}`,
   `CREATE TABLE IF NOT EXISTS ms_sessions (
  id BIGINT AUTO_INCREMENT PRIMARY KEY,server_key VARCHAR(64) ${BIN} NOT NULL,player_id INT NOT NULL,user_id BIGINT NULL,

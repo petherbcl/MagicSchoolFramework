@@ -2,19 +2,26 @@
 
 // Free-fly noclip. The server makes the player invisible and non-collidable for everyone; this script repeats
 // that locally (own model), removes gravity and walking input, then moves the player along the camera direction.
-// Keys: W/A/S/D move, Space up, Ctrl down, Shift fast.
+// Keys: W/S move along the camera direction (looking up flies up), A/D strafe, Space up, Ctrl down, Shift x5.
 const TICK_MS = 16;
 const SPEED = 600;       // units per second
-const FAST_FACTOR = 4;
+const FAST_FACTOR = 10;   // Shift multiplies the base speed by this
 let timer = null, last = 0;
 
 function down(...keys) { return keys.some(key => Key.isDown(key)); }
+
+// Direction the camera is actually looking (degrees; positive pitch = up). Falls back to the control rotation.
+function viewRotation() {
+  let view = null;
+  try { view = Camera.capture(); } catch { /* no camera available */ }
+  return (view && view.rotation) || LocalPlayer.getControlRotation();
+}
 
 function step() {
   const now = Date.now();
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
-  const position = LocalPlayer.getPosition(), look = LocalPlayer.getControlRotation();
+  const position = LocalPlayer.getPosition(), look = viewRotation();
   if (!position || !look) return;
   const yaw = look.yaw * Math.PI / 180, pitch = look.pitch * Math.PI / 180;
   const forward = (down("w") ? 1 : 0) - (down("s") ? 1 : 0);

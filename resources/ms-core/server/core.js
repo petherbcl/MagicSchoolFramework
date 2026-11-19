@@ -10,19 +10,20 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
   const current = s => !closing && sessions.get(s.playerId) === s;
   const ensure = s => check(current(s), "SESSION_EXPIRED");
   const session = id => { const s = sessions.get(id); check(s && current(s), "SESSION_EXPIRED"); return s; };
-  const permitted = (user, permission) => user.roles.some(role => (config.rolePermissions[role] || []).some(grant => grant === "*" || grant === permission));
+  const rolesOf = s => s.game?.roles || ["player"];
+  const permitted = (roles, permission) => roles.some(role => (config.rolePermissions[role] || []).some(grant => grant === "*" || grant === permission));
   const event = (name, value) => {
     try { Promise.resolve(emit(name, clone(value))).catch(() => logger.error("[ms-core] event handler failed: " + name)); }
     catch { logger.error("[ms-core] event handler failed: " + name); }
   };
   const snapshot = s => ({ sessionId: s.sessionId, playerId: s.playerId, userId: s.userId,
     status: s.status, authenticated: s.authenticated,
-    allowlist: s.user?.allowlist || null, roles: s.user?.roles || [], metadata: s.user?.metadata || {},
+    allowlist: s.user?.allowlist || null, roles: rolesOf(s), metadata: s.user?.metadata || {},
     identifiers: { observed: s.observed }, credentialConfirmed: s.credentialConfirmed,
     inGame: s.game !== null, characterId: s.game?.characterId ?? null });
-  // In-memory record of a player that picked a character and entered the game; roles follow the polled user row.
+  // In-memory record of a player that picked a character and entered the game; roles are the character's and follow the polled database rows.
   const gameInfo = s => ({ playerId: s.playerId, userId: s.userId, sessionId: s.sessionId, characterId: s.game.characterId,
-    roles: s.user?.roles || [], enteredAt: s.game.enteredAt });
+    roles: [...s.game.roles], enteredAt: s.game.enteredAt });
   function formUrl(userId) {
     if (!config.formUrl || !userId) return "";
     const url = new URL(config.formUrl); url.searchParams.set("id", userId); return url.href;
@@ -35,12 +36,18 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
       game.send(s.player, "ms-core:credential", { sessionId: s.sessionId, serverKey: config.serverKey, credential: s.newCredential });
     }
   }
+  // Roles belong to the character: re-read them while the player is in game.
+  async function refreshRoles(s) {
+    const game = s.game; if (!game) return;
+    const roles = await repository.characterRoles(game.characterId);
+    ensure(s); if (s.game === game) game.roles = roles;
+  }
   async function access(s) {
     ensure(s); check(s.authenticated && s.credentialConfirmed && s.userId, "NOT_AUTHENTICATED");
     const [user, ban, valid] = await Promise.all([repository.getUser(s.userId), repository.activeBan(s.userId), repository.verifyCredential(s.credentialHash, s.userId)]);
     check(valid, "INVALID_CREDENTIAL");
     ensure(s); check(user && user.allowlist === "approved", "ALLOWLIST_REQUIRED"); check(!ban, "ACCOUNT_BANNED");
-    s.user = user; return user;
+    s.user = user; await refreshRoles(s); return user;
   }
   function detach(s, reason, kickMessage) {
     if (sessions.get(s.playerId) !== s) return Promise.resolve();
@@ -83,6 +90,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     const [user, ban, valid] = await Promise.all([repository.getUser(s.userId), repository.activeBan(s.userId), repository.verifyCredential(s.credentialHash, s.userId)]);
     check(valid, "INVALID_CREDENTIAL");
     ensure(s); check(user, "USER_NOT_FOUND"); s.user = user;
+    await refreshRoles(s);
     if (ban || user.allowlist === "denied") {
       await detach(s, ban ? "banned" : "allowlistDenied", ban ? "Conta bloqueada: " + ban.reason : "O teu pedido de allowlist foi recusado."); return;
     }
@@ -192,7 +200,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
   }
   async function hasPermission(id, permission) {
     const s = sessions.get(id); if (!s || s.status !== "ready") return false;
-    try { return permitted(await access(s), permission); } catch { return false; }
+    try { await access(s); return permitted(rolesOf(s), permission); } catch { return false; }
   }
   async function actor(id, permission) {
     const s = session(id);
@@ -257,7 +265,9 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
         if (s.game) { check(s.game.characterId === input.characterId, "ALREADY_IN_GAME"); return clone(gameInfo(s)); }
         await access(s); // fresh roles/allowlist/ban/key from the database before the player counts as in game
         ensure(s); check(s.status === "ready" && !s.game, "INVALID_SESSION_STATE");
-        s.game = { characterId: input.characterId, enteredAt: new Date(clock()).toISOString() };
+        const roles = await repository.characterRoles(input.characterId); // the character's roles, fresh from the database
+        ensure(s); check(s.status === "ready" && !s.game, "INVALID_SESSION_STATE");
+        s.game = { characterId: input.characterId, roles, enteredAt: new Date(clock()).toISOString() };
         const info = gameInfo(s); event("ms:playerEnteredGame", info); return clone(info);
       },
       get: id => sessions.get(id)?.game ? clone(gameInfo(sessions.get(id))) : null,
@@ -269,9 +279,9 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
       approve: async (id, source) => { const result = await repository.setAllowlist(publicId(id), "approved", await actor(source, "allowlist.manage")); await tick(); return clone(result); },
       deny: async (id, reason, source) => { const result = await repository.setAllowlist(publicId(id), "denied", await actor(source, "allowlist.manage"), reason); await tick(); return clone(result); },
     }),
-    Roles: Object.freeze({ set: async (id, role, enabled, source) => {
-      const author = await actor(source, "roles.manage"); check(Object.hasOwn(config.rolePermissions, role) && typeof enabled === "boolean", "INVALID_ROLE");
-      const result = await repository.setRole(publicId(id), role, enabled, author); await tick(); return clone(result);
+    Roles: Object.freeze({ set: async (characterId, role, enabled, source) => {
+      const author = await actor(source, "roles.manage"); check(Object.hasOwn(config.rolePermissions, role) && role !== "player" && typeof enabled === "boolean", "INVALID_ROLE");
+      const result = await repository.setRole(publicId(characterId), role, enabled, author); await tick(); return clone(result);
     } }),
     Bans: Object.freeze({
       add: async (id, reason, expiresAt, source) => { const value = await repository.ban(publicId(id), reason, expiresAt, await actor(source, "bans.manage")); await tick(); return value; },

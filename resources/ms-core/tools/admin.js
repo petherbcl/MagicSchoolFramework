@@ -12,8 +12,8 @@ const help = `Database administration (PostgreSQL, MySQL or MariaDB; requires MS
   node resources/ms-core/tools/admin.js show <numericId>
   node resources/ms-core/tools/admin.js approve <numericId>
   node resources/ms-core/tools/admin.js deny <numericId> <reason>
-  node resources/ms-core/tools/admin.js role-add <numericId> <player|moderator|admin>
-  node resources/ms-core/tools/admin.js role-remove <numericId> <role>
+  node resources/ms-core/tools/admin.js role-add <characterId> <moderator|admin>
+  node resources/ms-core/tools/admin.js role-remove <characterId> <role>
   node resources/ms-core/tools/admin.js ban <numericId> <minutes|permanent> <reason>
   node resources/ms-core/tools/admin.js unban <numericId>
   node resources/ms-core/tools/admin.js recover <newPendingId> <originalId>
@@ -39,7 +39,7 @@ async function main(args = process.argv.slice(2)) {
       case "approve": await db.setAllowlist(userId, "approved", actor); console.log("Allowlist approved."); break;
       case "deny": await db.setAllowlist(userId, "denied", actor, [value, ...rest].filter(Boolean).join(" ")); console.log("Allowlist denied."); break;
       case "role-add": case "role-remove":
-        if (!Object.hasOwn(config.rolePermissions, value)) throw new Error("Unknown role");
+        if (!Object.hasOwn(config.rolePermissions, value) || value === "player") throw new Error("Unknown role");
         await db.setRole(userId, value, command === "role-add", actor); console.log("Role updated."); break;
       case "ban": {
         const minutes = Number(value);

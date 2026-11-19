@@ -20,6 +20,15 @@ function loadConfig(env = process.env, options = {}) {
   env = { ...readEnvFile(envFile), ...env };
   const role = (env.MS_ADMIN_ROLE || "admin").trim();
   if (!/^[A-Za-z0-9_-]{1,32}$/.test(role)) throw new Error("Invalid MS_ADMIN_ROLE");
-  return Object.freeze({ role });
+  // Optional noclip effects. `noclipFx` is a Niagara/Cascade asset path (see /fxlist); when empty the adapter picks
+  // the first catalog entry that looks like smoke. `noclipSkinFx` is a Player.setSkinFx name.
+  const noclipFx = (env.MS_ADMIN_NOCLIP_FX || "").trim();
+  const noclipSkinFx = (env.MS_ADMIN_NOCLIP_SKINFX || "").trim();
+  if (noclipFx.length > 300 || noclipSkinFx.length > 64) throw new Error("Invalid MS_ADMIN_NOCLIP_FX");
+  // Master switch for every noclip effect (smoke and skin FX). On by default.
+  const rawEnabled = (env.MS_ADMIN_NOCLIP_FX_ENABLED || "true").trim().toLowerCase();
+  if (!["true", "false", "1", "0"].includes(rawEnabled)) throw new Error("Invalid MS_ADMIN_NOCLIP_FX_ENABLED");
+  const noclipFxEnabled = rawEnabled === "true" || rawEnabled === "1";
+  return Object.freeze({ role, noclipFxEnabled, noclipFx, noclipSkinFx });
 }
 module.exports = { loadConfig };

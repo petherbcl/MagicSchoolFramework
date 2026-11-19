@@ -9,7 +9,7 @@ const { loadConfig } = require("../../../ms-sql/server/config");
 const { createSql } = require("../../../ms-sql/server");
 
 const EXTERNAL = { mysql: "MS_SQL_TEST_MYSQL_URL", mariadb: "MS_SQL_TEST_MARIADB_URL" };
-const TABLES = ["ms_audit_log", "ms_bans", "ms_connection_identifiers", "ms_sessions", "ms_user_credentials", "ms_user_roles", "ms_users"];
+const TABLES = ["ms_audit_log", "ms_bans", "ms_character_roles", "ms_connection_identifiers", "ms_sessions", "ms_user_credentials", "ms_users"];
 const TEST_SCHEMA = "ms_test"; // created by ms-sql at startup; ms-core only creates tables
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/;
 

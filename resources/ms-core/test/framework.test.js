@@ -141,7 +141,7 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
       await assert.rejects(f.repository.register(null, digest("second-" + kind), { [kind]: value }), { code: "IDENTIFIER_ALREADY_REGISTERED" });
       assert.equal((await sql.query("SELECT user_id FROM ms_connection_identifiers WHERE kind=? AND value=?", [kind, value]))[0].user_id, account.userId);
     }
-    for (const table of ["ms_users", "ms_user_credentials", "ms_user_roles", "ms_audit_log"]) {
+    for (const table of ["ms_users", "ms_user_credentials", "ms_audit_log"]) {
       assert.equal(Number((await sql.query(`SELECT count(*) AS n FROM ${table}`))[0].n), 4);
     }
   });
@@ -243,16 +243,19 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
   describe("Players: entering the game with a character", () => {
     test("enterGame keeps userId, playerId, characterId and roles in memory and emits ms:playerEnteredGame", async t => {
       const f = await fixture(t), account = await f.ready(1);
-      await f.repository.setRole(account.userId, "moderator", true, "console:test"); await f.core.tick();
+      assert.deepEqual(f.core.api.Users.get(1).roles, ["player"]); // no character yet: only the implicit role
+      await f.repository.setRole("42", "moderator", true, "console:test");
       const info = await f.core.api.Players.enterGame(1, { sessionId: account.sessionId, characterId: "42" });
       assert.deepEqual({ ...info, enteredAt: typeof info.enteredAt }, { playerId: 1, userId: account.userId, sessionId: account.sessionId,
-        characterId: "42", roles: ["moderator", "player"], enteredAt: "string" });
+        characterId: "42", roles: ["player", "moderator"], enteredAt: "string" });
       assert.deepEqual(f.core.api.Players.get(1), info); assert.deepEqual(f.core.api.Players.getByUserId(account.userId), info);
       assert.equal(f.core.api.Players.isInGame(1), true); assert.equal(f.core.api.Players.getAll().length, 1);
       assert.equal(f.core.api.Users.get(1).inGame, true); assert.equal(f.core.api.Users.get(1).characterId, "42");
       assert.equal(f.events.filter(e => e.name === "ms:playerEnteredGame").length, 1);
-      // roles follow the polled user row
-      await f.repository.setRole(account.userId, "admin", true, "console:test"); await f.core.tick();
+      // roles belong to the character and follow the polled rows; another character's roles do not apply
+      await f.repository.setRole("43", "admin", true, "console:test"); await f.core.tick();
+      assert.deepEqual(f.core.api.Players.get(1).roles, ["player", "moderator"]);
+      await f.repository.setRole("42", "admin", true, "console:test"); await f.core.tick();
       assert.deepEqual(f.core.api.Players.get(1).roles.sort(), ["admin", "moderator", "player"]);
     });
     test("enterGame is idempotent for the same character and refuses another one", async t => {
@@ -416,9 +419,11 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
   });
   test("roles are checked against the database and revocation is immediate", async t => {
     const f = await fixture(t), account = await f.ready();
-    await f.repository.setRole(account.userId, "admin", true, "console:test");
+    await f.repository.setRole("42", "admin", true, "console:test");
+    assert.equal(await f.core.api.Users.hasPermission(1, "roles.manage"), false); // not in game with that character yet
+    await f.core.api.Players.enterGame(1, { sessionId: account.sessionId, characterId: "42" });
     assert.equal(await f.core.api.Users.hasPermission(1, "roles.manage"), true);
-    await f.repository.setRole(account.userId, "admin", false, "console:test");
+    await f.repository.setRole("42", "admin", false, "console:test");
     assert.equal(await f.core.api.Users.hasPermission(1, "roles.manage"), false);
   });
   test("allowlist revocation and bans remove online access", async t => {

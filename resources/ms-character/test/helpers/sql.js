@@ -12,7 +12,7 @@ const { schemaFor: coreSchemaFor } = require("../../../ms-core/server/database/s
 
 const TEST_SCHEMA = "ms_test"; // created by ms-sql at startup; neither ms-core nor ms-character name it
 const EXTERNAL = { mysql: "MS_SQL_TEST_MYSQL_URL", mariadb: "MS_SQL_TEST_MARIADB_URL" };
-const CORE_TABLES = ["ms_audit_log", "ms_bans", "ms_connection_identifiers", "ms_sessions", "ms_user_credentials", "ms_user_roles", "ms_users"];
+const CORE_TABLES = ["ms_audit_log", "ms_bans", "ms_character_roles", "ms_connection_identifiers", "ms_sessions", "ms_user_credentials", "ms_users"];
 
 async function startPostgres() {
   const { PGlite } = require("@electric-sql/pglite");

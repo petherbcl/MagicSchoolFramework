@@ -92,7 +92,8 @@ Core.Users.get(3);
 // {
 //   sessionId: "57", playerId: 3, userId: "12",
 //   status: "ready", authenticated: true, credentialConfirmed: true,
-//   allowlist: "approved", roles: ["player", "moderator"], metadata: { discordTag: "ana#0001" },
+//   allowlist: "approved", roles: ["player", "moderator"], // da personagem em jogo; ["player"] fora de jogo
+//   metadata: { discordTag: "ana#0001" },
 //   identifiers: { observed: { discordId: "123456789", steamId: "7656119..." } },
 //   inGame: true, characterId: "8"   // ver Core.Players
 // }
@@ -100,7 +101,7 @@ Core.Users.isReady(3);                            // true
 Core.Users.getOnlineById("12")?.playerId;         // 3
 await Core.Users.hasPermission(3, "bans.manage"); // true
 await Core.Users.load("12", 3);
-// { userId: "12", allowlist: "approved", metadata: { discordTag: "ana#0001" }, roles: ["player", "moderator"],
+// { userId: "12", allowlist: "approved", metadata: { discordTag: "ana#0001" },
 //   createdAt: "2026-11-17T10:02:11.000Z", lastSeenAt: "2026-11-19T16:30:02.000Z" }
 await Core.Users.setMetadata("12", "language", "pt-PT", 3);
 // { discordTag: "ana#0001", language: "pt-PT" }
@@ -120,7 +121,7 @@ Jogadores que já escolheram uma personagem e estão em jogo. Quem chama `enterG
 | `isInGame(playerId)` | `true` se o jogador está em jogo. |
 | `getAll()` | Lista de todos os jogadores em jogo. |
 
-Os `roles` do registo seguem a linha de utilizador que o core relê a cada `MS_ACCESS_POLL_SECONDS`, por isso uma alteração de roles aparece com esse atraso. O registo desaparece quando a sessão termina.
+Os `roles` são os da personagem (tabela `ms_character_roles`; `player` é implícito) e o core relê-os a cada `MS_ACCESS_POLL_SECONDS`, por isso uma alteração de roles aparece com esse atraso. O registo desaparece quando a sessão termina.
 
 ```javascript
 await Core.Players.enterGame(3, { sessionId: "57", characterId: "8" });
@@ -141,7 +142,7 @@ Core.Players.get(99);       // null
 
 ```javascript
 await Core.Allowlist.approve("15", 3);
-// { userId: "15", allowlist: "approved", metadata: {}, roles: ["player"], createdAt: "...", lastSeenAt: "..." }
+// { userId: "15", allowlist: "approved", metadata: {}, createdAt: "...", lastSeenAt: "..." }
 await Core.Allowlist.deny("16", "Formulário incompleto", 3); // igual, com allowlist: "denied"
 ```
 
@@ -149,11 +150,10 @@ await Core.Allowlist.deny("16", "Formulário incompleto", 3); // igual, com allo
 
 | Função | Descrição |
 | --- | --- |
-| `set(userId, role, enabled, actorPlayerId)` | Liga (`true`) ou desliga (`false`) um role da conta (`roles.manage`). O role tem de existir em `rolePermissions` (`player`, `moderator`, `admin`), senão `INVALID_ROLE`. |
+| `set(characterId, role, enabled, actorPlayerId)` | Liga (`true`) ou desliga (`false`) um role da personagem (`roles.manage`; devolve os roles da personagem). O role tem de existir em `rolePermissions` e não pode ser `player` (implícito), senão `INVALID_ROLE`. |
 
 ```javascript
-await Core.Roles.set("15", "moderator", true, 3);
-// { userId: "15", allowlist: "approved", metadata: {}, roles: ["player", "moderator"], createdAt: "...", lastSeenAt: "..." }
+await Core.Roles.set("8", "moderator", true, 3); // ["player", "moderator"]
 ```
 
 ### `Core.Bans`

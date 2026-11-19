@@ -49,7 +49,7 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
     await repository.createTables();
     assert.equal(sql.schema, db.schema);
     const rows = await sql.query(`SELECT table_name AS t FROM information_schema.tables WHERE table_schema=${db.currentSchema} ORDER BY table_name`);
-    assert.deepEqual(rows.map(r => r.t.toLowerCase()), ["ms_audit_log", "ms_bans", "ms_connection_identifiers", "ms_sessions", "ms_user_credentials", "ms_user_roles", "ms_users"]);
+    assert.deepEqual(rows.map(r => r.t.toLowerCase()), ["ms_audit_log", "ms_bans", "ms_character_roles", "ms_connection_identifiers", "ms_sessions", "ms_user_credentials", "ms_users"]);
     assert.equal(await sql.scalar(mysqlFamily ? "SELECT DATABASE()" : "SELECT current_schema()"), db.schema);
   });
 });

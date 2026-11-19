@@ -41,8 +41,12 @@ class Repository {
   async getUser(id, db = this.sql) {
     const row = await db.single("SELECT * FROM ms_users WHERE id=?", [publicId(id)]);
     if (!row) return null;
-    const roles = (await db.query("SELECT role FROM ms_user_roles WHERE user_id=? ORDER BY role", [id])).map(r => r.role);
-    return { userId: String(row.id), allowlist: row.allowlist, metadata: row.metadata, roles, createdAt: row.created_at, lastSeenAt: row.last_seen_at };
+    return { userId: String(row.id), allowlist: row.allowlist, metadata: row.metadata, createdAt: row.created_at, lastSeenAt: row.last_seen_at };
+  }
+  // Roles are per character. Every character is implicitly "player"; only extra roles are stored.
+  async characterRoles(characterId, db = this.sql) {
+    const rows = await db.query("SELECT role FROM ms_character_roles WHERE character_id=? ORDER BY role", [publicId(characterId)]);
+    return ["player", ...rows.map(r => r.role).filter(role => role !== "player")];
   }
   async register(credentialHash, newHash, identifiers = {}) {
     const values = Object.entries(observed(identifiers));
@@ -114,7 +118,6 @@ class Repository {
   }
   async createUser(db) {
     const id = await db.insert("INSERT INTO ms_users(allowlist,metadata) VALUES('pending',?)", ["{}"]);
-    await db.query("INSERT INTO ms_user_roles(user_id,role) VALUES(?,'player')", [id]);
     await this.audit(db, "registration", "user.created", id);
     return id;
   }
@@ -204,18 +207,20 @@ class Repository {
       await this.audit(db, actor, "allowlist." + status, id, { reason });
     }); return this.getUser(id);
   }
-  async setRole(id, role, enabled, actor) {
-    check(typeof role === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(role), "INVALID_ROLE");
+  // Roles belong to a character. The implicit "player" role is never stored. ms-core does not own ms_characters,
+  // so the character id is not verified here; callers (ms-character, admin tool) pass ids they got from there.
+  async setRole(characterId, role, enabled, actor) {
+    characterId = publicId(characterId);
+    check(typeof role === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(role) && role !== "player", "INVALID_ROLE");
     await this.transaction(async db => {
-      check(await this.getUser(id, db), "USER_NOT_FOUND");
       if (enabled) {
-        // Idempotent add without ON CONFLICT; the user row lock serializes concurrent grants.
-        await db.single("SELECT id FROM ms_users WHERE id=? FOR UPDATE", [id]);
-        await db.query(`INSERT INTO ms_user_roles(user_id,role) SELECT id,? FROM ms_users WHERE id=?
-          AND NOT EXISTS (SELECT 1 FROM ms_user_roles WHERE user_id=? AND role=?)`, [role, id, id, role]);
-      } else await db.query("DELETE FROM ms_user_roles WHERE user_id=? AND role=?", [id, role]);
-      await this.audit(db, actor, enabled ? "role.add" : "role.remove", id, { role });
-    }); return this.getUser(id);
+        // Idempotent add without ON CONFLICT: the primary key rejects a duplicate, checked first.
+        if (!(await db.single("SELECT 1 FROM ms_character_roles WHERE character_id=? AND role=?", [characterId, role]))) {
+          await db.query("INSERT INTO ms_character_roles(character_id,role) VALUES(?,?)", [characterId, role]);
+        }
+      } else await db.query("DELETE FROM ms_character_roles WHERE character_id=? AND role=?", [characterId, role]);
+      await this.audit(db, actor, enabled ? "role.add" : "role.remove", null, { role, characterId });
+    }); return this.characterRoles(characterId);
   }
   async activeBan(id) {
     const row = await this.sql.single(`SELECT id,reason,expires_at FROM ms_bans WHERE user_id=? AND revoked_at IS NULL
