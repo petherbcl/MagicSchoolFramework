@@ -1,16 +1,27 @@
 "use strict";
 
 let view = null, pageReady = false, lastState = null, pendingCredential = null;
+// The CEF storage of the first view of a game session can read as empty (even after seconds) while a later view reads
+// the stored key. When the page finds no key it asks for a fresh view, a limited number of times per session.
+const MAX_VIEW_RETRIES = 2, VIEW_RETRY_DELAY_MS = 800;
+let viewAttempt = 0, retrySessionId = null, retryTimer = null;
 
 function flush() {
-  if (pageReady && view !== null && lastState) Web.emit(view, "session", lastState);
+  if (pageReady && view !== null && lastState) Web.emit(view, "session", { ...lastState, viewAttempt, maxViewRetries: MAX_VIEW_RETRIES });
   if (pageReady && view !== null && pendingCredential) Web.emit(view, "credential", pendingCredential);
 }
 function closeView() {
   if (view !== null) Web.destroyView(view);
   view = null; pageReady = false;
 }
+function onStorageEmpty() {
+  if (view === null || lastState === null || viewAttempt >= MAX_VIEW_RETRIES || retryTimer !== null) return;
+  viewAttempt++;
+  closeView();
+  retryTimer = setTimeout(() => { retryTimer = null; if (lastState !== null && lastState.status !== "ready") show(lastState); }, VIEW_RETRY_DELAY_MS);
+}
 function show(state) {
+  if (state.sessionId !== retrySessionId) { retrySessionId = state.sessionId; viewAttempt = 0; }
   lastState = state;
   if (state.status === "ready") {
     closeView();
@@ -28,6 +39,7 @@ function show(state) {
     view = Web.createView("fw://resources/ms-core/client/ui/index.html", { focus: true });
     Web.on(view, "ready", () => { pageReady = true; flush(); });
     Web.on(view, "register", payload => Events.emitServer("ms-core:register", payload));
+    Web.on(view, "storageEmpty", onStorageEmpty);
     Web.on(view, "credentialStored", payload => {
       pendingCredential = null;
       Events.emitServer("ms-core:credentialStored", payload);
