@@ -132,6 +132,7 @@ function acquire() {
 
 function openLobbySession() {
   if (session !== null) return;
+  turned = 0; // a fresh session starts at the initial angle
   if (!attempt("open lobby session", acquire)) return;
   attempt("body frame", () => setFrame("body"));
 }
@@ -195,6 +196,7 @@ function sendSchemaWhenReady(forceOnTimeout) {
 }
 
 function beginCreator() {
+  unrotate(); // the creator always opens at the initial angle, even if the lobby preview was turned
   if (session !== null) {
     // Shared session from the lobby: the previewed card look must not leak into the creator.
     if (!attempt("importLook(originalLook)", () => Creator.importLook(session.originalLook))) { failCreator("CREATOR_BEGIN_FAILED"); return; }
