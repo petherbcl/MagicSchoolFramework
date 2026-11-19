@@ -240,6 +240,50 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
     assert.deepEqual(ready.map(e => e.payload), [{ playerId: 1, sessionId: account.sessionId, userId: account.userId }]);
     await f.core.tick(); assert.equal(f.events.filter(e => e.name === "ms:playerReady").length, 1);
   });
+  describe("Players: entering the game with a character", () => {
+    test("enterGame keeps userId, playerId, characterId and roles in memory and emits ms:playerEnteredGame", async t => {
+      const f = await fixture(t), account = await f.ready(1);
+      await f.repository.setRole(account.userId, "moderator", true, "console:test"); await f.core.tick();
+      const info = await f.core.api.Players.enterGame(1, { sessionId: account.sessionId, characterId: "42" });
+      assert.deepEqual({ ...info, enteredAt: typeof info.enteredAt }, { playerId: 1, userId: account.userId, sessionId: account.sessionId,
+        characterId: "42", roles: ["moderator", "player"], enteredAt: "string" });
+      assert.deepEqual(f.core.api.Players.get(1), info); assert.deepEqual(f.core.api.Players.getByUserId(account.userId), info);
+      assert.equal(f.core.api.Players.isInGame(1), true); assert.equal(f.core.api.Players.getAll().length, 1);
+      assert.equal(f.core.api.Users.get(1).inGame, true); assert.equal(f.core.api.Users.get(1).characterId, "42");
+      assert.equal(f.events.filter(e => e.name === "ms:playerEnteredGame").length, 1);
+      // roles follow the polled user row
+      await f.repository.setRole(account.userId, "admin", true, "console:test"); await f.core.tick();
+      assert.deepEqual(f.core.api.Players.get(1).roles.sort(), ["admin", "moderator", "player"]);
+    });
+    test("enterGame is idempotent for the same character and refuses another one", async t => {
+      const f = await fixture(t), account = await f.ready(1), input = { sessionId: account.sessionId, characterId: "42" };
+      await f.core.api.Players.enterGame(1, input); await f.core.api.Players.enterGame(1, input);
+      assert.equal(f.events.filter(e => e.name === "ms:playerEnteredGame").length, 1);
+      await assert.rejects(f.core.api.Players.enterGame(1, { ...input, characterId: "43" }), { code: "ALREADY_IN_GAME" });
+    });
+    test("enterGame needs a ready session, the same sessionId and a numeric characterId", async t => {
+      const f = await fixture(t), waiting = await f.register(2), account = await f.ready(1);
+      await assert.rejects(f.core.api.Players.enterGame(2, { sessionId: waiting.sessionId, characterId: "1" }), { code: "INVALID_SESSION_STATE" });
+      await assert.rejects(f.core.api.Players.enterGame(1, { sessionId: "999999", characterId: "1" }), { code: "INVALID_GAME_ENTRY" });
+      await assert.rejects(f.core.api.Players.enterGame(1, { sessionId: account.sessionId, characterId: "abc" }), { code: "INVALID_GAME_ENTRY" });
+      await assert.rejects(f.core.api.Players.enterGame(9, { sessionId: "1", characterId: "1" }), { code: "SESSION_EXPIRED" });
+      assert.equal(f.core.api.Players.isInGame(1), false);
+    });
+    test("a banned account cannot enter the game", async t => {
+      const f = await fixture(t), account = await f.ready(1);
+      await f.repository.ban(account.userId, "test", null, "console:test");
+      await assert.rejects(f.core.api.Players.enterGame(1, { sessionId: account.sessionId, characterId: "1" }), { code: "ACCOUNT_BANNED" });
+      assert.equal(f.core.api.Players.isInGame(1), false);
+    });
+    test("the record is dropped, with ms:playerLeftGame, when the session ends", async t => {
+      const f = await fixture(t), account = await f.ready(1);
+      await f.core.api.Players.enterGame(1, { sessionId: account.sessionId, characterId: "42" });
+      await f.core.disconnect(1);
+      assert.equal(f.core.api.Players.get(1), null); assert.deepEqual(f.core.api.Players.getAll(), []);
+      const left = f.events.find(e => e.name === "ms:playerLeftGame");
+      assert.equal(left.payload.characterId, "42"); assert.equal(left.payload.reason, "disconnect");
+    });
+  });
   describe("SEC-03: database outages during tick()", () => {
     // `outage.error` makes every repository read fail the way ms-sql does; null means the database answers.
     function withOutage(f, kind = "CONNECTION") {

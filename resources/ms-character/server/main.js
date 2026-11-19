@@ -14,6 +14,8 @@ const open = () => ready && sqlApi()?.isReady() === true;
 const Core = { Users: {
   get: id => Exports.get("ms-core", "Core")?.Users.get(id) ?? null,
   isReady: id => Boolean(Exports.get("ms-core", "Core")?.Users.isReady(id)),
+}, Players: {
+  enterGame: (id, input) => Exports.get("ms-core", "Core").Players.enterGame(id, input),
 } };
 const messages = { INVALID_NAME: "Usa nomes com 2 a 32 letras.", INVALID_HOUSE: "Escolhe uma casa válida.",
   INVALID_CHARACTER: "Dados de personagem inválidos.", INVALID_LOOK: "Aparência inválida. Volta a tentar.",

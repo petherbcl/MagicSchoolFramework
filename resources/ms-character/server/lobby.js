@@ -109,6 +109,8 @@ function createLobby({ repository, config, game, core, emit = () => {}, logger =
       game.release(l.player, l); l.status = "playing";
       await repository.touch(character.characterId, l.userId); ensure(l);
       await save(l); ensure(l); send(l);
+      // Tell ms-core the player enters the game with this character: it re-checks the account and keeps the player in memory.
+      await core.Players.enterGame(l.playerId, { sessionId: l.sessionId, characterId: character.characterId }); ensure(l);
       event("ms:characterReady", { playerId: l.playerId, sessionId: l.sessionId, userId: l.userId, characterId: character.characterId });
       return summary(character);
     } catch (error) {
@@ -134,7 +136,7 @@ function createLobby({ repository, config, game, core, emit = () => {}, logger =
     }));
   }
   const api = Object.freeze({
-    version: "0.4.0",
+    version: "0.5.0",
     isPlaying: id => { const l = lobbies.get(id); return Boolean(l && valid(l) && l.status === "playing"); },
     getSelected: id => { const l = lobbies.get(id); return l && valid(l) && l.status === "playing" ? clone(l.character) : null; },
     list: async id => { const l = lobbyOf(id); return (await repository.list(l.userId)).map(summary); },

@@ -1,6 +1,6 @@
 # ms-character
 
-Lobby de personagens do MagicSchoolRP (versão 0.4.0). Depende do [ms-core](../ms-core/README.md) e do [ms-sql](../ms-sql/README.md): o jogador só chega aqui depois de a conta estar aprovada e a chave local verificada.
+Lobby de personagens do MagicSchoolRP (versão 0.5.0). Depende do [ms-core](../ms-core/README.md) e do [ms-sql](../ms-sql/README.md): o jogador só chega aqui depois de a conta estar aprovada e a chave local verificada.
 
 ## Fluxo
 
@@ -9,7 +9,7 @@ Lobby de personagens do MagicSchoolRP (versão 0.4.0). Depende do [ms-core](../m
    - **Sem personagens:** abre diretamente o criador de personagens.
    - **Com personagens:** o jogador escolhe uma com "Jogar", cria outra (até `MS_MAX_CHARACTERS`) ou apaga uma. Ao focar um cartão, a personagem aparece em pré-visualização com a aparência guardada.
 3. Ao escolher, o servidor confirma que a personagem pertence à conta e restaura-a: viagem para Overland, inventário, look, casa e posição guardada. Uma personagem nova aparece no spawn.
-4. O jogador sai do lobby para o mundo 0 e o recurso emite `ms:characterReady`.
+4. O jogador sai do lobby para o mundo 0, o recurso avisa o ms-core com `Core.Players.enterGame(playerId, { sessionId, characterId })` (o core volta a validar a conta e guarda em memória `userId`, `playerId`, `characterId` e roles; requer ms-core 0.7.0) e emite `ms:characterReady`.
 5. A personagem é guardada automaticamente (`MS_SAVE_INTERVAL_SECONDS`) e quando o jogador sai. Os saves usam controlo de versão, por isso um save desatualizado é recusado.
    - **Posição:** só se restauram posições do Overland. Fora do Overland (castelo, masmorras, durante cargas) o save mantém a última posição Overland conhecida.
    - **Falhas no autosave:** uma falha transitória (BD, captura nativa) é repetida no tick seguinte. O jogador só é desligado à 3.ª falha seguida.
@@ -31,7 +31,7 @@ A aparência só se escolhe na criação (não há edição depois). O criador u
 
 O jogador apaga uma personagem no lobby, depois de confirmar num diálogo. É um soft delete (ver abaixo).
 
-Se o restauro nativo falhar, o jogador é desligado, porque o estado ficaria a meio. Nesse caso não se emite `ms:characterReady` e não se grava nada.
+Se o ms-core recusar a entrada em jogo (sessão alterada, conta bloqueada), o jogador é desligado e não se emite `ms:characterReady`. Se o restauro nativo falhar, o jogador é desligado, porque o estado ficaria a meio. Nesse caso não se emite `ms:characterReady` e não se grava nada.
 
 ## Configuração
 

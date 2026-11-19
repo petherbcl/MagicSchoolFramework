@@ -18,7 +18,11 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
   const snapshot = s => ({ sessionId: s.sessionId, playerId: s.playerId, userId: s.userId,
     status: s.status, authenticated: s.authenticated,
     allowlist: s.user?.allowlist || null, roles: s.user?.roles || [], metadata: s.user?.metadata || {},
-    identifiers: { observed: s.observed }, credentialConfirmed: s.credentialConfirmed });
+    identifiers: { observed: s.observed }, credentialConfirmed: s.credentialConfirmed,
+    inGame: s.game !== null, characterId: s.game?.characterId ?? null });
+  // In-memory record of a player that picked a character and entered the game; roles follow the polled user row.
+  const gameInfo = s => ({ playerId: s.playerId, userId: s.userId, sessionId: s.sessionId, characterId: s.game.characterId,
+    roles: s.user?.roles || [], enteredAt: s.game.enteredAt });
   function formUrl(userId) {
     if (!config.formUrl || !userId) return "";
     const url = new URL(config.formUrl); url.searchParams.set("id", userId); return url.href;
@@ -41,6 +45,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
   function detach(s, reason, kickMessage) {
     if (sessions.get(s.playerId) !== s) return Promise.resolve();
     s.status = "closed"; s.newCredential = null;
+    if (s.game) { event("ms:playerLeftGame", { ...gameInfo(s), reason }); s.game = null; }
     sessions.delete(s.playerId);
     if (accounts.get(s.userId) === s) accounts.delete(s.userId);
     try { game.cancel(s); } catch { logger.error("[ms-core] native cleanup failed"); }
@@ -61,7 +66,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
       userId: null, user: null, authenticated: false, credentialConfirmed: false, newCredential: null,
       status: "connecting", loaded,
       world: config.quarantineWorldBase + (++worldSequence), expiresAt: clock() + config.approvalTimeoutMs,
-      registration: null };
+      registration: null, game: null };
     sessions.set(player.id, s);
     try {
       game.restrict(player, s);
@@ -229,7 +234,7 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
     } finally { checking = false; }
   }
   const api = Object.freeze({
-    version: "0.6.0",
+    version: "0.7.0",
     Users: Object.freeze({
       get: id => sessions.has(id) ? clone(snapshot(sessions.get(id))) : null,
       getOnlineById: id => accounts.has(String(id)) ? clone(snapshot(accounts.get(String(id)))) : null,
@@ -242,6 +247,23 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
         const user = await repository.setMetadata(id, key, metadata(key, value), author);
         if (accounts.has(id)) accounts.get(id).user = user; return clone(user.metadata);
       },
+    }),
+    // Characters belong to another resource: it tells ms-core when a ready player enters the game with one.
+    Players: Object.freeze({
+      enterGame: async (playerId, input) => {
+        const s = session(playerId);
+        check(input && typeof input.characterId === "string" && /^[0-9]{1,19}$/.test(input.characterId) && input.sessionId === s.sessionId, "INVALID_GAME_ENTRY");
+        check(s.status === "ready", "INVALID_SESSION_STATE");
+        if (s.game) { check(s.game.characterId === input.characterId, "ALREADY_IN_GAME"); return clone(gameInfo(s)); }
+        await access(s); // fresh roles/allowlist/ban/key from the database before the player counts as in game
+        ensure(s); check(s.status === "ready" && !s.game, "INVALID_SESSION_STATE");
+        s.game = { characterId: input.characterId, enteredAt: new Date(clock()).toISOString() };
+        const info = gameInfo(s); event("ms:playerEnteredGame", info); return clone(info);
+      },
+      get: id => sessions.get(id)?.game ? clone(gameInfo(sessions.get(id))) : null,
+      getByUserId: id => accounts.get(String(id))?.game ? clone(gameInfo(accounts.get(String(id)))) : null,
+      isInGame: id => Boolean(sessions.get(id)?.game),
+      getAll: () => [...sessions.values()].filter(s => s.game).map(s => clone(gameInfo(s))),
     }),
     Allowlist: Object.freeze({
       approve: async (id, source) => { const result = await repository.setAllowlist(publicId(id), "approved", await actor(source, "allowlist.manage")); await tick(); return clone(result); },

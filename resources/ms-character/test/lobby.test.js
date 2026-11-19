@@ -21,13 +21,14 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
 
   async function fixture(t, overrides = {}, settings = {}) {
     let now = 1000000;
-    const repository = new Repository(sql), sent = [], kicks = [], events = [], applied = [], released = [], sessions = new Map();
-    const core = { Users: { get: id => sessions.get(id) || null, isReady: id => sessions.get(id)?.ready === true } };
+    const repository = new Repository(sql), sent = [], kicks = [], events = [], applied = [], released = [], sessions = new Map(), entered = [];
+    const core = { Users: { get: id => sessions.get(id) || null, isReady: id => sessions.get(id)?.ready === true },
+      Players: { async enterGame(id, input) { if (overrides.enterGame) await overrides.enterGame(id, input); entered.push({ playerId: id, ...input }); } } };
     const game = { enterLobby(p, l) { l.previous = {}; }, release(p) { released.push(p.id); }, cancel() {},
       send(p, name, payload) { sent.push({ playerId: p.id, name, payload }); },
       kick(p, reason) { kicks.push({ playerId: p.id, reason }); },
       async apply(p, character) { applied.push({ playerId: p.id, character }); },
-      capture(p, previous) { return { ...previous, inventory: [{ item: "saved-" + p.id }] }; }, ...overrides };
+      capture(p, previous) { return { ...previous, inventory: [{ item: "saved-" + p.id }] }; }, ...overrides, enterGame: undefined };
     const lobby = createLobby({ repository, config: { ...config, ...settings }, game, core, clock: () => now,
       emit: (name, payload) => events.push({ name, payload }), logger: { error() {} } });
     t.after(async () => { await lobby.stop(); });
@@ -37,7 +38,7 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
       await lobby.open(player(id), { sessionId: "s" + id, userId });
     }
     const state = id => sent.filter(v => v.playerId === id && v.name === "ms-character:state").at(-1)?.payload;
-    return { lobby, repository, sent, kicks, events, applied, released, sessions, player, join, state, advance(ms) { now += ms; } };
+    return { lobby, repository, sent, kicks, events, applied, released, entered, sessions, player, join, state, advance(ms) { now += ms; } };
   }
   const look = () => ({ format: "arcanemp-look", version: 7, gender: "male", pronoun: "wizard", hood: false, gear: ["GA_Back_014"],
     presets: { skin: "s1", hairStyle: "h1" }, voice: { pitch: 0, tone: 0 } });
@@ -91,6 +92,18 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
     const row = await f.repository.get(characterId);
     assert.ok(row.version >= 1); assert.deepEqual(row.state.inventory, [{ item: "saved-1" }]);
     assert.equal(f.lobby.api.getSelected(1).characterId, characterId);
+  });
+  test("selecting a character tells ms-core the player enters the game, before ms:characterReady", async t => {
+    const f = await fixture(t); await f.join(); const { characterId } = await f.lobby.create(1, ana);
+    f.advance(1000); await f.lobby.select(1, characterId);
+    assert.deepEqual(f.entered, [{ playerId: 1, sessionId: "s1", characterId }]);
+  });
+  test("when ms-core refuses the game entry the player is kicked and ms:characterReady is never emitted", async t => {
+    const f = await fixture(t, { async enterGame() { throw Object.assign(new Error("refused"), { code: "INVALID_SESSION_STATE" }); } });
+    await f.join(); const { characterId } = await f.lobby.create(1, ana);
+    f.advance(1000); await assert.rejects(f.lobby.select(1, characterId));
+    assert.match(f.kicks.at(-1).reason, /carregar a personagem/);
+    assert.equal(f.events.some(e => e.name === "ms:characterReady"), false);
   });
   test("characters of another account cannot be selected", async t => {
     const f = await fixture(t); await f.join(1, "1"); const { characterId } = await f.lobby.create(1, ana);
@@ -345,7 +358,7 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
     const player = { id: 7, connected: true, isVisible: () => true, isInvulnerable: () => false, getFastTravelEnabled: () => true,
       setVirtualWorld() {}, setVisible() {}, setInvulnerable() {}, setFastTravelEnabled() {}, hold: () => true, release() {},
       emit(name, payload) { (name === "ms-character:notice" ? notices : states).push(JSON.parse(payload)); }, kick(reason) { kicks.push(reason); } };
-    const core = { Users: { get: id => sessions.get(id) || null, isReady: id => sessions.has(id) } };
+    const core = { Users: { get: id => sessions.get(id) || null, isReady: id => sessions.has(id) }, Players: { async enterGame() {} } };
     Object.assign(process.env, { MS_MAX_CHARACTERS: "1", MS_SAVE_INTERVAL_SECONDS: "300" });
     Object.assign(globalThis, {
       Events: { on: (name, fn) => { on[name] = fn; }, onClient: (name, fn) => { client[name] = fn; }, emit() {} },
@@ -441,11 +454,11 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
     assert.deepEqual(setLook, [characterId]); assert.equal(lookCalls, 0);
     assert.equal(g.kicks.length, 0);
   });
-  test("version 0.4.0 matches package.json, api.version and the README", async t => {
+  test("version 0.5.0 matches package.json, api.version and the README", async t => {
     const f = await fixture(t);
     const fs = require("node:fs"), path = require("node:path");
     const pkg = require("../package.json"), readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
-    assert.equal(f.lobby.api.version, "0.4.0"); assert.equal(pkg.version, "0.4.0"); assert.match(readme, /versão 0\.4\.0/);
+    assert.equal(f.lobby.api.version, "0.5.0"); assert.equal(pkg.version, "0.5.0"); assert.match(readme, /versão 0.5.0/);
   });
 
   test("creations are capped per account in 24 h, deleted characters included (M-01)", async t => {
