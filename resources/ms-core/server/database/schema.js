@@ -1,35 +1,11 @@
 "use strict";
-// Idempotent: creates missing objects and leaves existing tables and data untouched.
-module.exports = `
-CREATE SCHEMA IF NOT EXISTS ms_core;
-CREATE TABLE IF NOT EXISTS ms_core.ms_users (
- id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- allowlist TEXT NOT NULL DEFAULT 'pending' CHECK(allowlist IN ('pending','approved','denied')),
- metadata JSONB NOT NULL DEFAULT '{}',created_at TIMESTAMPTZ NOT NULL DEFAULT now(),last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE TABLE IF NOT EXISTS ms_core.ms_user_credentials (
- token_hash TEXT PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES ms_core.ms_users(id),created_at TIMESTAMPTZ NOT NULL DEFAULT now(),revoked_at TIMESTAMPTZ
-);
-CREATE TABLE IF NOT EXISTS ms_core.ms_user_roles (user_id BIGINT NOT NULL REFERENCES ms_core.ms_users(id),role TEXT NOT NULL,PRIMARY KEY(user_id,role));
-CREATE TABLE IF NOT EXISTS ms_core.ms_sessions (
- id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,server_key TEXT NOT NULL,player_id INTEGER NOT NULL,user_id BIGINT REFERENCES ms_core.ms_users(id),
- started_at TIMESTAMPTZ NOT NULL DEFAULT now(),ended_at TIMESTAMPTZ,end_reason TEXT
-);
-CREATE INDEX IF NOT EXISTS ms_sessions_user ON ms_core.ms_sessions(user_id,started_at);
-CREATE TABLE IF NOT EXISTS ms_core.ms_connection_identifiers (
- user_id BIGINT NOT NULL REFERENCES ms_core.ms_users(id),kind TEXT NOT NULL,value TEXT NOT NULL,
- first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- PRIMARY KEY(user_id,kind,value)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ms_connection_identifiers_unique_owner ON ms_core.ms_connection_identifiers(kind,value)
- WHERE kind IN ('steamId','epicId','discordId','hardwareId');
-CREATE TABLE IF NOT EXISTS ms_core.ms_bans (
- id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES ms_core.ms_users(id),reason TEXT NOT NULL,actor TEXT NOT NULL,
- created_at TIMESTAMPTZ NOT NULL DEFAULT now(),expires_at TIMESTAMPTZ,revoked_at TIMESTAMPTZ
-);
-CREATE INDEX IF NOT EXISTS ms_bans_user ON ms_core.ms_bans(user_id,revoked_at,expires_at);
-CREATE TABLE IF NOT EXISTS ms_core.ms_audit_log (
- id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,actor TEXT NOT NULL,action TEXT NOT NULL,user_id BIGINT REFERENCES ms_core.ms_users(id),
- details JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-`;
+// Picks the DDL for the dialect reported by ms-sql (`sql.dialect`). MySQL and MariaDB share one file.
+const postgres = require("./schema.postgres");
+const mysql = require("./schema.mysql");
+
+function schemaFor(dialect) {
+  if (dialect === "postgres") return postgres;
+  if (dialect === "mysql" || dialect === "mariadb") return mysql;
+  throw new Error("UNSUPPORTED_SQL_DIALECT");
+}
+module.exports = { schemaFor };

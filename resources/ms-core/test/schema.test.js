@@ -1,30 +1,65 @@
 "use strict";
-const { test, before, after, beforeEach } = require("node:test");
+const { test, describe, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
-const { PGlite } = require("@electric-sql/pglite");
-const { PGLiteSocketServer } = require("@electric-sql/pglite-socket");
 const { Repository } = require("../server/database/repository");
-let engine, server, repository;
-before(async () => {
-  engine = await PGlite.create();
-  server = new PGLiteSocketServer({ db: engine, host: "127.0.0.1", port: 0, maxConnections: 4 });
-  await server.start();
-  repository = new Repository({ databaseUrl: "postgresql://postgres:postgres@" + server.getServerConn() + "/postgres", poolSize: 1, queryTimeoutMs: 10000 });
-});
-after(async () => { await repository?.close(); await server?.stop(); await engine?.close(); });
-beforeEach(async () => { await repository.pool.query("DROP SCHEMA IF EXISTS ms_core CASCADE"); });
+const { DIALECTS, startDb } = require("./helpers/sql");
 
-test("schema uses numeric identities only", async () => {
-  await repository.createSchema();
-  const result = await repository.pool.query(`SELECT table_name,column_name,data_type,is_identity FROM information_schema.columns
-    WHERE table_schema='ms_core' AND column_name='id' ORDER BY table_name`);
-  assert.deepEqual(result.rows.map(r => r.table_name), ["ms_audit_log", "ms_bans", "ms_sessions", "ms_users"]);
-  for (const row of result.rows) { assert.equal(row.data_type, "bigint"); assert.equal(row.is_identity, "YES"); }
-  assert.equal((await repository.pool.query("SELECT 1 FROM information_schema.columns WHERE table_schema='ms_core' AND udt_name='uuid'")).rowCount, 0);
+for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () => {
+  let db, sql, repository;
+  const mysqlFamily = target.name !== "postgres";
+  before(async () => { db = await startDb(target); sql = db.sql; repository = new Repository(sql); });
+  after(async () => { await db?.stop(); });
+  beforeEach(async () => { await db.dropTables(); });
+
+  test("schema uses numeric identities only", async () => {
+    await repository.createTables();
+    const rows = await sql.query(`SELECT table_name AS t,column_name AS c,data_type AS d,${mysqlFamily ? "extra" : "is_identity"} AS e FROM information_schema.columns
+      WHERE table_schema=${db.currentSchema} AND column_name='id' ORDER BY table_name`);
+    assert.deepEqual(rows.map(r => r.t.toLowerCase()), ["ms_audit_log", "ms_bans", "ms_sessions", "ms_users"]);
+    for (const row of rows) {
+      assert.equal(row.d.toLowerCase(), "bigint");
+      if (mysqlFamily) assert.match(String(row.e), /auto_increment/i); else assert.equal(row.e, "YES");
+    }
+    assert.equal((await sql.query(`SELECT 1 FROM information_schema.columns WHERE table_schema=${db.currentSchema} AND data_type='uuid'`)).length, 0);
+  });
+  test("creating the schema again keeps existing data", async () => {
+    await repository.createTables();
+    await repository.createUser(sql);
+    await repository.createTables();
+    assert.equal((await sql.query("SELECT id FROM ms_users"))[0].id, "1");
+  });
+  test("the unique owner index rejects a repeated account identifier but allows repeated IPs", async () => {
+    await repository.createTables();
+    const a = await repository.createUser(sql), b = await repository.createUser(sql);
+    const add = (user, kind, value) => sql.query("INSERT INTO ms_connection_identifiers(user_id,kind,value) VALUES(?,?,?)", [user, kind, value]);
+    await add(a, "steamId", "steam-1");
+    await assert.rejects(add(b, "steamId", "steam-1"), { kind: "UNIQUE_VIOLATION", constraint: "ms_connection_identifiers_unique_owner" });
+    await add(a, "ip", "127.0.0.1"); await add(b, "ip", "127.0.0.1");
+    assert.equal((await sql.query("SELECT 1 FROM ms_connection_identifiers WHERE kind='ip'")).length, 2);
+  });
+  test("credential hashes are compared case-sensitively", async () => {
+    await repository.createTables();
+    const user = await repository.createUser(sql);
+    await sql.query("INSERT INTO ms_user_credentials(token_hash,user_id) VALUES(?,?)", ["AbC", user]);
+    await sql.query("INSERT INTO ms_user_credentials(token_hash,user_id) VALUES(?,?)", ["abc", user]);
+    assert.equal(await repository.verifyCredential("AbC", user), true);
+    assert.equal(await repository.verifyCredential("ABC", user), false);
+  });
+  test("tables are created unqualified inside the schema configured in ms-sql", async () => {
+    await repository.createTables();
+    assert.equal(sql.schema, db.schema);
+    const rows = await sql.query(`SELECT table_name AS t FROM information_schema.tables WHERE table_schema=${db.currentSchema} ORDER BY table_name`);
+    assert.deepEqual(rows.map(r => r.t.toLowerCase()), ["ms_audit_log", "ms_bans", "ms_connection_identifiers", "ms_sessions", "ms_user_credentials", "ms_user_roles", "ms_users"]);
+    assert.equal(await sql.scalar(mysqlFamily ? "SELECT DATABASE()" : "SELECT current_schema()"), db.schema);
+  });
 });
-test("creating the schema again keeps existing data", async () => {
-  await repository.createSchema();
-  await repository.pool.query("INSERT INTO ms_core.ms_users DEFAULT VALUES");
-  await repository.createSchema();
-  assert.equal((await repository.pool.query("SELECT id::text FROM ms_core.ms_users")).rows[0].id, "1");
+
+test("the DDL never creates or names a schema", () => {
+  const { schemaFor } = require("../server/database/schema");
+  for (const dialect of ["postgres", "mysql", "mariadb"]) {
+    const ddl = schemaFor(dialect).join("\n");
+    assert.doesNotMatch(ddl, /CREATE\s+(SCHEMA|DATABASE)/i, dialect);
+    assert.doesNotMatch(ddl, /ms_core/i, dialect);
+    assert.doesNotMatch(ddl, /REFERENCES\s+\w+\./i, dialect);
+  }
 });

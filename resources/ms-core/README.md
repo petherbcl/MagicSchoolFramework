@@ -1,6 +1,6 @@
 # ms-core
 
-Framework base do MagicSchoolRP (versão 0.4.0). Gere contas PostgreSQL com ID numérico, admissão no ecrã de entrada, allowlist externa, chave local, roles e bans. A especificação completa (fluxo, esquema, SQL para a aplicação do formulário, recuperação de contas) está em [docs/MS_CORE.md](../../docs/MS_CORE.md).
+Framework base do MagicSchoolRP (versão 0.6.0). Gere contas (PostgreSQL, MySQL ou MariaDB através do [ms-sql](../ms-sql/README.md)) com ID numérico, admissão no ecrã de entrada, allowlist externa, chave local, roles e bans. A especificação completa (fluxo, esquema, SQL para a aplicação do formulário, recuperação de contas) está em [docs/MS_CORE.md](../../docs/MS_CORE.md).
 
 **Fora do âmbito:** personagens. A criação, a seleção e a persistência (inventário, look e localização) ficam no recurso [ms-character](../ms-character/README.md), que depende do ms-core, abre o lobby de personagens no `ms:playerReady` e associa as personagens ao `userId`.
 
@@ -19,12 +19,10 @@ Identificadores na conta:
 
 ## Configuração
 
-Copiar [.env.example](.env.example) para `.env`. As variáveis definidas no ambiente do processo têm prioridade sobre o ficheiro. Sem `MS_DATABASE_URL`, a admissão fica fechada.
+Copiar [.env.example](.env.example) para `.env`. As variáveis definidas no ambiente do processo têm prioridade sobre o ficheiro. A base de dados **não** se configura aqui: `MS_SQL_URL` e o pool definem-se em `resources/ms-sql/.env`. Sem `MS_SQL_URL` no ms-sql, a admissão fica fechada.
 
 | Variável | Default | Função |
 | --- | --- | --- |
-| `MS_DATABASE_URL` | vazio | Connection string PostgreSQL (obrigatória) |
-| `MS_DATABASE_POOL_SIZE` | 5 | Pool de 1 a 20 ligações |
 | `MS_SERVER_KEY` | MagicSchoolRP | Namespace do servidor e do storage local |
 | `MS_ALLOWLIST_FORM_URL` | vazio | URL do formulário; recebe `?id=<ID>` |
 | `MS_REQUIRED_IDENTIFIERS` | vazio | Identificadores obrigatórios; `,` = E, `\|` = OU |

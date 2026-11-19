@@ -1,4 +1,4 @@
-/** ms-character 0.2.0 server-only API (Exports.get("ms-character", "Characters")). IDs are decimal strings. */
+/** ms-character 0.4.0 server-only API (Exports.get("ms-character", "Characters")). IDs are decimal strings. */
 export type PublicId = string;
 export type House = "Unaffiliated" | "Gryffindor" | "Hufflepuff" | "Ravenclaw" | "Slytherin";
 export type LobbyStatus = "loading" | "lobby" | "creating" | "deleting" | "applying" | "playing" | "closed";

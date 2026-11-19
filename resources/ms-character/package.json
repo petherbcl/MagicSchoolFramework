@@ -1,6 +1,6 @@
 {
   "name": "ms-character",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "private": true,
   "description": "MagicSchoolRP character lobby: selection, creation and persistence per ms-core account",
   "engines": {
@@ -25,12 +25,10 @@
       "Characters"
     ],
     "resourceDependencies": [
-      "ms-core"
+      "ms-core",
+      "ms-sql"
     ],
     "errorBehavior": "stop"
-  },
-  "dependencies": {
-    "pg": "8.23.1"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.16",

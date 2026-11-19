@@ -1,4 +1,4 @@
-/** ms-core 0.4.0 server-only API. BIGINT public IDs use decimal strings for precision. */
+/** ms-core 0.6.0 server-only API. BIGINT public IDs use decimal strings for precision. */
 export type PublicId = string;
 export type SessionStatus = "connecting" | "identifying" | "registering" | "awaitingCredentialStorage" |
   "checkingAccess" | "awaitingApproval" | "waitingForWorld" | "ready" | "closed";

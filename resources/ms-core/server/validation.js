@@ -31,7 +31,7 @@ function observed(player) {
   const result = {};
   for (const key of ["steamId", "epicId", "discordId", "discordName", "hardwareId", "ip", "nickname"]) {
     const value = player[key];
-    if (typeof value === "string" && value.trim()) result[key] = value.trim().slice(0, key === "nickname" ? 100 : 256);
+    if (typeof value === "string" && value.trim()) result[key] = value.trim().slice(0, key === "nickname" ? 100 : 256).trimEnd();
   }
   return result;
 }
@@ -41,4 +41,8 @@ function publicId(value) {
   check(typeof id === "string" && /^[1-9][0-9]{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n, "INVALID_ID");
   return id;
 }
-module.exports = { CoreError, check, clone, json, metadata, observed, publicId, UNIQUE_IDENTIFIERS };
+// SEC-03: true for errors that mean "the database can not answer right now" (ms-sql SqlError kinds or the
+// repository's SQL_UNAVAILABLE), as opposed to bugs or validation failures.
+const UNAVAILABLE_KINDS = ["NOT_READY", "CONNECTION", "TIMEOUT"];
+const isDatabaseUnavailable = error => Boolean(error) && (error.code === "SQL_UNAVAILABLE" || UNAVAILABLE_KINDS.includes(error.kind));
+module.exports = { CoreError, isDatabaseUnavailable, check, clone, json, metadata, observed, publicId, UNIQUE_IDENTIFIERS };

@@ -17,31 +17,30 @@ function envFile(t, content) {
 }
 
 test("resource env files support BOM, quoted values and comments", t => {
-  const file = envFile(t, '\uFEFF# fixture\nMS_DATABASE_URL="postgresql://user:example%23%3D@localhost/test"\nMS_ACCESS_POLL_SECONDS=7 # comment\n');
+  const file = envFile(t, '\uFEFF# fixture\nMS_ALLOWLIST_FORM_URL="https://forms.example/a%23b"\nMS_ACCESS_POLL_SECONDS=7 # comment\n');
   const config = loadConfig({}, { envFile: file });
-  assert.equal(config.databaseConfigured, true);
-  assert.equal(config.databaseUrl, "postgresql://user:example%23%3D@localhost/test");
+  assert.equal(config.formUrl, "https://forms.example/a%23b");
   assert.equal(config.accessPollMs, 7000);
 });
 test("host environment overrides the file without mutating the host object", t => {
-  const file = envFile(t, "MS_DATABASE_URL=postgresql://file/test\nMS_DATABASE_POOL_SIZE=7\n");
-  const env = { MS_DATABASE_URL: "postgresql://host/test", MS_DATABASE_POOL_SIZE: "2" };
+  const file = envFile(t, "MS_SERVER_KEY=FromFile\nMS_ACCESS_POLL_SECONDS=7\n");
+  const env = { MS_SERVER_KEY: "FromHost", MS_ACCESS_POLL_SECONDS: "2" };
   const config = loadConfig(env, { envFile: file });
-  assert.equal(config.databaseUrl, env.MS_DATABASE_URL);
-  assert.equal(config.poolSize, 2);
-  assert.deepEqual(Object.keys(env).sort(), ["MS_DATABASE_POOL_SIZE", "MS_DATABASE_URL"]);
+  assert.equal(config.serverKey, "FromHost");
+  assert.equal(config.accessPollMs, 2000);
+  assert.deepEqual(Object.keys(env).sort(), ["MS_ACCESS_POLL_SECONDS", "MS_SERVER_KEY"]);
 });
 test("an explicit empty host variable is not silently replaced", t => {
-  const file = envFile(t, "MS_DATABASE_URL=postgresql://file/test\n");
-  assert.equal(loadConfig({ MS_DATABASE_URL: "" }, { envFile: file }).databaseConfigured, false);
+  const file = envFile(t, "MS_SERVER_KEY=FromFile\n");
+  assert.equal(loadConfig({ MS_SERVER_KEY: "" }, { envFile: file }).serverKey, "MagicSchoolRP");
 });
 test("a missing env file falls back to the supplied environment", t => {
   const file = envFile(t, ""); fs.unlinkSync(file);
-  assert.equal(loadConfig({ MS_DATABASE_URL: "postgresql://host/test" }, { envFile: file }).databaseConfigured, true);
-  assert.equal(loadConfig({}, { envFile: file }).databaseConfigured, false);
+  assert.equal(loadConfig({ MS_SERVER_KEY: "FromHost" }, { envFile: file }).serverKey, "FromHost");
+  assert.equal(loadConfig({}, { envFile: file }).serverKey, "MagicSchoolRP");
 });
 test("explicit test environments do not import the operator's real env file", () => {
-  assert.equal(loadConfig({}).databaseConfigured, false);
+  assert.equal(loadConfig({}).serverKey, "MagicSchoolRP");
 });
 test("required identifiers are parsed, deduplicated and validated", () => {
   assert.deepEqual(loadConfig({}).requiredIdentifiers, []);

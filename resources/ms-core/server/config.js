@@ -37,8 +37,6 @@ function loadConfig(env = process.env, options = {}) {
     env === process.env ? path.resolve(__dirname, "../.env") : null;
   // Never mutate process.env or replace values explicitly supplied by the host.
   env = { ...readEnvFile(envFile), ...env };
-  const databaseUrl = env.MS_DATABASE_URL || "";
-  if (databaseUrl && !/^postgres(?:ql)?:\/\//.test(databaseUrl)) throw new Error("MS_DATABASE_URL must be a PostgreSQL connection string");
   const serverKey = env.MS_SERVER_KEY || "MagicSchoolRP";
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(serverKey)) throw new Error("Invalid MS_SERVER_KEY");
   let formUrl = env.MS_ALLOWLIST_FORM_URL || "";
@@ -52,11 +50,16 @@ function loadConfig(env = process.env, options = {}) {
   // Parsed into groups; each group needs at least one of its identifiers.
   const requiredIdentifiers = Object.freeze(parseRequired(env.MS_REQUIRED_IDENTIFIERS));
   return Object.freeze({
-    databaseUrl, databaseConfigured: Boolean(databaseUrl), serverKey, formUrl, requiredIdentifiers,
-    poolSize: integer(env, "MS_DATABASE_POOL_SIZE", 5, 1, 20), queryTimeoutMs: 10000,
+    // No database settings here: the connection belongs to ms-sql (resources/ms-sql/.env).
+    serverKey, formUrl, requiredIdentifiers,
     approvalTimeoutMs: integer(env, "MS_APPROVAL_TIMEOUT_SECONDS", 1800, 60, 86400) * 1000,
     accessPollMs: integer(env, "MS_ACCESS_POLL_SECONDS", 5, 1, 60) * 1000,
-    maxSessions: 128, quarantineWorldBase: 3000000000,
+    maxSessions: 128,
+    // SEC-03: how long a database outage is tolerated before sessions that are not ready are kicked.
+    outageGraceMs: 5 * 60 * 1000,
+    // R-02: native handshake semaphore (concurrent jobs, waiting queue, per-job timeout).
+    admission: Object.freeze({ concurrency: 3, maxQueue: 256, taskTimeoutMs: 15000 }),
+    quarantineWorldBase: 3000000000,
     spawn: { position: { x: 366784, y: -461527, z: -82610 }, yaw: -130 },
     rolePermissions: { player: ["users.metadata.self"],
       moderator: ["users.read", "allowlist.manage", "bans.manage"], admin: ["*"] },

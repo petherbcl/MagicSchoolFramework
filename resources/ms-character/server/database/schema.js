@@ -1,17 +1,11 @@
 "use strict";
-// Idempotent: creates missing objects and leaves existing tables and data untouched.
-// Requires ms-core's schema (ms_core.ms_users) to exist first.
-module.exports = `
-CREATE SCHEMA IF NOT EXISTS ms_character;
-CREATE TABLE IF NOT EXISTS ms_character.characters (
- id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES ms_core.ms_users(id),
- first_name TEXT NOT NULL,last_name TEXT NOT NULL,house TEXT NOT NULL,
- state JSONB NOT NULL DEFAULT '{"inventory":[],"look":null,"location":null}',version INTEGER NOT NULL DEFAULT 0,
- created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),last_played_at TIMESTAMPTZ,
- deleted_at TIMESTAMPTZ
-);
--- Soft delete (NULL = active). Databases created before the column existed get it here.
-ALTER TABLE ms_character.characters ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
-CREATE INDEX IF NOT EXISTS characters_user ON ms_character.characters(user_id);
-CREATE INDEX IF NOT EXISTS characters_user_active ON ms_character.characters(user_id) WHERE deleted_at IS NULL;
-`;
+// Picks the DDL for the dialect reported by ms-sql (`sql.dialect`). MySQL and MariaDB share one file.
+const postgres = require("./schema.postgres");
+const mysql = require("./schema.mysql");
+
+function schemaFor(dialect) {
+  if (dialect === "postgres") return postgres;
+  if (dialect === "mysql" || dialect === "mariadb") return mysql;
+  throw new Error("UNSUPPORTED_SQL_DIALECT");
+}
+module.exports = { schemaFor };

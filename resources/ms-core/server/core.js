@@ -1,11 +1,12 @@
 "use strict";
 const crypto = require("node:crypto");
-const { check, clone, metadata, observed, CoreError, publicId } = require("./validation");
+const { check, clone, metadata, observed, CoreError, publicId, isDatabaseUnavailable } = require("./validation");
 const hash = value => crypto.createHash("sha256").update(value).digest("hex");
 
-function createCore({ repository, config, game, emit = () => {}, logger = console, clock = Date.now }) {
+function createCore({ repository, config, game, emit = () => {}, logger = console, clock = Date.now, databaseReady = () => true }) {
   const sessions = new Map(), accounts = new Map(), closingTasks = new Set();
-  let closing = false, worldSequence = 0, checking = false;
+  let closing = false, worldSequence = 0, checking = false, outageSince = null;
+  const graceMs = config.outageGraceMs ?? 5 * 60 * 1000;
   const current = s => !closing && sessions.get(s.playerId) === s;
   const ensure = s => check(current(s), "SESSION_EXPIRED");
   const session = id => { const s = sessions.get(id); check(s && current(s), "SESSION_EXPIRED"); return s; };
@@ -194,24 +195,41 @@ function createCore({ repository, config, game, emit = () => {}, logger = consol
   }
   async function loaded(id) {
     const s = session(id); s.loaded = true;
-    if (s.status === "waitingForWorld") enter(s);
+    // Never promote while the database can not confirm the account: tick() enters once it is back.
+    if (s.status === "waitingForWorld") { if (databaseReady()) enter(s); }
     else if (s.status !== "ready") { game.restrict(s.player, s); send(s); }
+  }
+  // SEC-03: a database outage is not an authorization failure. Sessions already past the check stay as they
+  // are and sessions still waiting are left untouched (never promoted without verification) until the database
+  // answers again; only after `outageGraceMs` are sessions that are not ready released with the old kick.
+  function noteOutage() {
+    if (outageSince === null) { outageSince = clock(); logger.error("[ms-core] database unavailable: deferring access checks"); }
   }
   async function tick() {
     if (checking || closing) return; checking = true;
     try {
+      let up = databaseReady();
+      if (!up) noteOutage();
       for (const s of [...sessions.values()]) {
         if (!current(s)) continue;
         if (s.status !== "ready" && s.expiresAt <= clock()) { await detach(s, "timeout", "O tempo de espera terminou. Volta a ligar com o mesmo cliente."); continue; }
-        if (s.userId && s.credentialConfirmed && !["checkingAccess", "registering"].includes(s.status)) {
+        if (up && s.userId && s.credentialConfirmed && !["checkingAccess", "registering"].includes(s.status)) {
           try { await evaluate(s); }
-          catch { if (current(s)) await detach(s, "databaseUnavailable", "A base de dados está indisponível."); }
+          catch (error) {
+            if (!current(s)) continue;
+            if (!isDatabaseUnavailable(error)) { await detach(s, "databaseUnavailable", "A base de dados está indisponível."); continue; }
+            up = false; noteOutage();
+          }
+        }
+        if (!up && s.status !== "ready" && current(s) && outageSince !== null && clock() - outageSince > graceMs) {
+          await detach(s, "databaseUnavailable", "A base de dados está indisponível.");
         }
       }
+      if (up && outageSince !== null) { outageSince = null; logger.error("[ms-core] database available again: access checks resumed"); }
     } finally { checking = false; }
   }
   const api = Object.freeze({
-    version: "0.4.0",
+    version: "0.6.0",
     Users: Object.freeze({
       get: id => sessions.has(id) ? clone(snapshot(sessions.get(id))) : null,
       getOnlineById: id => accounts.has(String(id)) ? clone(snapshot(accounts.get(String(id)))) : null,

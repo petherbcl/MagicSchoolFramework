@@ -1,8 +1,8 @@
 {
   "name": "ms-core",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "private": true,
-  "description": "MagicSchoolRP PostgreSQL accounts, numeric registration IDs and external allowlist",
+  "description": "MagicSchoolRP accounts, numeric registration IDs and external allowlist",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -25,13 +25,13 @@
     "exports": [
       "Core"
     ],
+    "resourceDependencies": [
+      "ms-sql"
+    ],
     "errorBehavior": "stop"
   },
-  "dependencies": {
-    "pg": "8.23.1"
-  },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.16",
+    "@electric-sql/pglite": "0.6.06",
     "@electric-sql/pglite-socket": "0.2.19"
   }
 }

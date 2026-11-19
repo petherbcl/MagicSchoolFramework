@@ -5,6 +5,11 @@ const { createLobby } = require("./lobby");
 const { createGameAdapter } = require("./game");
 const { CharacterError } = require("./validation");
 let lobby, repository, game, config, saveTimer, purgeTimer, ready = false;
+const STARTUP_DB_WAIT_MS = 10000;
+// ms-sql owns the connection. Resolved lazily on every use so an `ensure ms-sql` reload never leaves a stale export.
+function sqlApi() { try { return Exports.get("ms-sql", "Sql") || null; } catch { return null; } }
+// Player requests are served only while the lobby is started and the database is reachable.
+const open = () => ready && sqlApi()?.isReady() === true;
 // Resolved on every call so an "ensure ms-core" reload never leaves a stale export behind.
 const Core = { Users: {
   get: id => Exports.get("ms-core", "Core")?.Users.get(id) ?? null,
@@ -48,7 +53,7 @@ function openLobby(player, session) {
 }
 // ms-core emits this after approval, key check and world load; re-verify the session first.
 Events.on("ms:playerReady", ({ playerId, sessionId, userId }) => {
-  if (!ready || Core.Users.get(playerId)?.sessionId !== sessionId || !Core.Users.isReady(playerId)) return;
+  if (!open() || Core.Users.get(playerId)?.sessionId !== sessionId || !Core.Users.isReady(playerId)) return;
   const player = PlayerManager.getById(playerId);
   if (player) openLobby(player, { sessionId, userId });
 });
@@ -56,21 +61,26 @@ Events.on("ms:sessionEnded", ({ sessionId }) => { if (ready) lobby.sessionEnded(
 Events.on("playerDisconnect", player => { rateNoticeAt.delete(player.id); if (lobby) lobby.disconnect(player.id).catch(() => console.error("[ms-character] disconnect save failed")); });
 Events.on("playerTeleportComplete", (player, requestId, status) => game?.complete(player.id, "teleport", requestId, status));
 Events.on("playerMapTravelComplete", (player, requestId, status) => game?.complete(player.id, "map", requestId, status));
-Events.onClient("ms-character:sync", player => { if (ready) safe(player, () => lobby.sync(player.id)); });
-Events.onClient("ms-character:create", (player, input) => { if (ready) safe(player, () => lobby.create(player.id, input)); });
+Events.onClient("ms-character:sync", player => { if (open()) safe(player, () => lobby.sync(player.id)); });
+Events.onClient("ms-character:create", (player, input) => { if (open()) safe(player, () => lobby.create(player.id, input)); });
 Events.onClient("ms-character:select", (player, input) => {
-  if (ready && input && typeof input.characterId === "string" && input.characterId.length <= 19) safe(player, () => lobby.select(player.id, input.characterId));
+  if (open() && input && typeof input.characterId === "string" && input.characterId.length <= 19) safe(player, () => lobby.select(player.id, input.characterId));
 });
 Events.onClient("ms-character:delete", (player, input) => {
-  if (ready && input && typeof input.characterId === "string" && input.characterId.length <= 19) safe(player, () => lobby.delete(player.id, input.characterId), deleteFailures);
+  if (open() && input && typeof input.characterId === "string" && input.characterId.length <= 19) safe(player, () => lobby.delete(player.id, input.characterId), deleteFailures);
 });
 Events.on("resourceStart", async name => {
   if (name !== "ms-character") return;
   config = loadConfig();
-  if (!config.databaseConfigured) { console.error("[ms-character] set MS_DATABASE_URL (ms-character/.env or ms-core/.env); character lobby disabled"); return; }
   try {
+    if (!sqlApi()) { console.error("[ms-character] the ms-sql export is unavailable (is ms-sql started?); character lobby disabled"); return; }
+    try { await sqlApi().awaitConnection(STARTUP_DB_WAIT_MS); }
+    catch (error) {
+      if (error?.kind !== "NOT_READY") throw error;
+      console.error("[ms-character] ms-sql has no database configured (set MS_SQL_URL in resources/ms-sql/.env); character lobby disabled"); return;
+    }
     if (typeof Exports.get("ms-core", "Core")?.Users?.isReady !== "function") throw new Error("MS_CORE_EXPORT_MISSING");
-    repository = new Repository(config); await repository.createSchema();
+    repository = new Repository(sqlApi); await repository.createTables();
     game = createGameAdapter(config);
     lobby = createLobby({ repository, config, game, core: Core, emit: (event, payload) => Events.emit(event, payload) });
     if (!Exports.register("Characters", lobby.api)) throw new Error("EXPORT_REGISTRATION_FAILED");
@@ -86,12 +96,12 @@ Events.on("resourceStart", async name => {
     }
     console.log("[ms-character] character lobby ready");
   } catch (error) {
-    ready = false; if (lobby) await lobby.stop(); if (repository) await repository.close();
+    ready = false; if (lobby) await lobby.stop();
     console.error("[ms-character] startup failed: " + (error.code || error.message || error.name)); throw new Error("MS_CHARACTER_STARTUP_FAILED");
   }
 });
 Events.on("resourceStop", async name => {
   if (name !== "ms-character") return;
   ready = false; if (saveTimer) clearInterval(saveTimer); if (purgeTimer) clearInterval(purgeTimer);
-  if (lobby) await lobby.stop(); if (repository) await repository.close();
+  if (lobby) await lobby.stop();
 });

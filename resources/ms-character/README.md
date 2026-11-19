@@ -1,6 +1,6 @@
 # ms-character
 
-Lobby de personagens do MagicSchoolRP (versão 0.2.0). Depende do [ms-core](../ms-core/README.md): o jogador só chega aqui depois de a conta estar aprovada e a chave local verificada.
+Lobby de personagens do MagicSchoolRP (versão 0.4.0). Depende do [ms-core](../ms-core/README.md) e do [ms-sql](../ms-sql/README.md): o jogador só chega aqui depois de a conta estar aprovada e a chave local verificada.
 
 ## Fluxo
 
@@ -35,11 +35,10 @@ Se o restauro nativo falhar, o jogador é desligado, porque o estado ficaria a m
 
 ## Configuração
 
-Por omissão usa o `MS_DATABASE_URL` do `resources/ms-core/.env`. Um `.env` próprio (ver [.env.example](.env.example)) e as variáveis de ambiente do processo têm prioridade.
+O ms-character **não tem nenhum parâmetro de base de dados** (nem URL, nem pool, nem timeouts): a ligação pertence ao [ms-sql](../ms-sql/README.md) (`resources/ms-sql/.env`, `MS_SQL_URL`). O recurso declara `ms-core` e `ms-sql` em `resourceDependencies` e resolve o export `Sql` de forma lazy. Sem BD pronta (ms-sql sem `MS_SQL_URL`, ou ligação em baixo) o lobby fica desativado e regista o motivo no log. Um `.env` próprio (ver [.env.example](.env.example)) e as variáveis de ambiente do processo (prioritárias) só afinam os limites abaixo.
 
 | Variável | Default | Função |
 | --- | --- | --- |
-| `MS_CHARACTER_POOL_SIZE` | 3 | Pool PostgreSQL, 1–20 |
 | `MS_MAX_CHARACTERS` | 1 | Personagens por conta, 1–5 |
 | `MS_SAVE_INTERVAL_SECONDS` | 30 | Autosave, 5–300 |
 | `MS_MAX_CREATIONS_PER_DAY` | 5 | Personagens que uma conta pode criar em 24 h, **incluindo as apagadas**, 1–100. Impede ciclos de criar e apagar que encheriam a BD |
@@ -49,37 +48,49 @@ As coordenadas do lobby e do spawn de personagens novas estão em [server/config
 
 ## Base de dados
 
-O recurso cria o schema `ms_character` com a tabela `ms_character.characters`, que referencia `ms_core.ms_users(id)`. O schema do ms-core tem de existir primeiro. Tal como no ms-core, não há migrations: o schema é criado com `IF NOT EXISTS` em cada arranque. A criação de personagens fica registada em `ms_core.ms_audit_log` (`character.created`).
+O recurso cria a tabela `ms_characters` (índices `ms_characters_user` e `ms_characters_user_active`), que referencia `ms_users(id)` do ms-core. **Não cria nem nomeia schemas**: o schema (`MS_SQL_SCHEMA`, por exemplo `magic_school_rp`) é definido só no ms-sql, que o cria uma vez no arranque, e todas as tabelas (ms-core e ms-character) vivem nele, por isso o SQL não tem prefixos. As tabelas do ms-core têm de existir primeiro no mesmo schema (`MS_CORE_SCHEMA_MISSING` se faltarem). Tal como no ms-core, não há migrations: as tabelas são criadas com `IF NOT EXISTS` em cada arranque (`createTables()`). A criação de personagens fica registada em `ms_audit_log` (`character.created`).
 
-Uma BD criada antes da versão 0.4.0 do ms-core tem as personagens em `ms_core.ms_characters`. Para as passar para aqui, correr uma vez:
+**Renome na 0.4.0:** a tabela `characters` passou a `ms_characters` (e os índices a `ms_characters_user*`), porque as tabelas de todos os resources partilham agora um só schema e o prefixo `ms_` evita colisões futuras. A BD antiga foi apagada e não há migração nem compatibilidade com os schemas `ms_core`/`ms_character`.
 
-```sql
-INSERT INTO ms_character.characters(user_id,first_name,last_name,house,state,version,created_at,updated_at)
-SELECT user_id,first_name,last_name,house,state,version,created_at,updated_at FROM ms_core.ms_characters ORDER BY id;
-```
+Funciona em **PostgreSQL, MySQL e MariaDB**, conforme o `MS_SQL_URL` do ms-sql (`sql.dialect`). O DDL é uma lista de statements por motor: [schema.postgres.js](server/database/schema.postgres.js) (sem `CREATE SCHEMA`) e [schema.mysql.js](server/database/schema.mysql.js) (MySQL 8.0.19+ e MariaDB 10.6+). No MySQL/MariaDB o "schema" é a base de dados `MS_SQL_SCHEMA`, criada pelo ms-sql; o índice parcial `ms_characters_user_active` passa a um índice simples `(user_id, deleted_at)` e a coluna `state` (JSON) não tem `DEFAULT`, porque o valor é sempre passado no INSERT. O `createTables()` corre sob `sql.withLock("ms-character:schema", ...)` e falha com `MS_CORE_SCHEMA_MISSING` se o schema do ms-core não existir. Os cortes das 24 h do limite de criações e da retenção calculam-se em JS (`Date`), e uma transação escolhida como vítima de deadlock é repetida (até 2 vezes).
 
 ### Recuperar uma personagem apagada
 
-Apagar uma personagem é um soft delete: a linha fica com `deleted_at` preenchido, deixa de aparecer no lobby, deixa de contar para o limite `MS_MAX_CHARACTERS` e fica registada em `ms_core.ms_audit_log` (`character.deleted`). Fica recuperável durante `MS_DELETED_RETENTION_DAYS` dias; depois é eliminada de vez.
+Apagar uma personagem é um soft delete: a linha fica com `deleted_at` preenchido, deixa de aparecer no lobby, deixa de contar para o limite `MS_MAX_CHARACTERS` e fica registada em `magic_school_rp.ms_audit_log` (`character.deleted`). Fica recuperável durante `MS_DELETED_RETENTION_DAYS` dias; depois é eliminada de vez.
 
-Um admin recupera-a no `psql`, numa só instrução atómica. Só restaura se a personagem estiver apagada e se a conta tiver vaga, e só então regista `character.restored`:
+Um admin recupera-a no `psql`, numa só instrução atómica. O `psql` não passa pelo ms-sql, por isso o schema (valor de `MS_SQL_SCHEMA`, aqui `magic_school_rp`) vai explícito nas tabelas; em alternativa fazer antes `SET search_path TO magic_school_rp;` e omitir o prefixo. Só restaura se a personagem estiver apagada e se a conta tiver vaga, e só então regista `character.restored`:
 
 ```sql
 \set cid 123        -- ID da personagem
 \set max 1          -- o valor de MS_MAX_CHARACTERS
 \set admin 'nome'   -- quem restaura (sem aspas dentro do nome)
 WITH r AS (
-  UPDATE ms_character.characters c SET deleted_at = NULL
+  UPDATE magic_school_rp.ms_characters c SET deleted_at = NULL
   WHERE c.id = :cid AND c.deleted_at IS NOT NULL
-    AND (SELECT count(*) FROM ms_character.characters x WHERE x.user_id = c.user_id AND x.deleted_at IS NULL) < :max
+    AND (SELECT count(*) FROM magic_school_rp.ms_characters x WHERE x.user_id = c.user_id AND x.deleted_at IS NULL) < :max
   RETURNING c.id, c.user_id)
-INSERT INTO ms_core.ms_audit_log(actor, action, user_id, details)
+INSERT INTO magic_school_rp.ms_audit_log(actor, action, user_id, details)
 SELECT 'admin:' || :'admin', 'character.restored', user_id, jsonb_build_object('characterId', id::text) FROM r;
 ```
 
 `INSERT 0 0` quer dizer que nada foi restaurado: a personagem não estava apagada, não existe, já foi purgada ou a conta não tem vaga.
 
-Tentativas de apagar ou escolher personagens de outra conta ficam em `ms_core.ms_audit_log` como `character.delete_denied` e `character.select_denied`.
+No MySQL/MariaDB (equivalente, **não validado** em servidor real), no cliente `mysql`:
+
+```sql
+SET @cid = 123, @max = 1, @admin = 'nome';
+START TRANSACTION;
+UPDATE magic_school_rp.ms_characters c SET c.deleted_at = NULL
+WHERE c.id = @cid AND c.deleted_at IS NOT NULL
+  AND (SELECT count(*) FROM (SELECT user_id FROM magic_school_rp.ms_characters WHERE deleted_at IS NULL) x WHERE x.user_id = c.user_id) < @max;
+SELECT ROW_COUNT();  -- 1 = restaurada; 0 = nada a fazer (faz ROLLBACK em vez do passo seguinte)
+INSERT INTO magic_school_rp.ms_audit_log(actor, action, user_id, details)
+SELECT CONCAT('admin:', @admin), 'character.restored', user_id, JSON_OBJECT('characterId', CAST(id AS CHAR))
+FROM magic_school_rp.ms_characters WHERE id = @cid;
+COMMIT;
+```
+
+Tentativas de apagar ou escolher personagens de outra conta ficam em `magic_school_rp.ms_audit_log` como `character.delete_denied` e `character.select_denied`.
 
 ## Integração
 
@@ -123,4 +134,9 @@ npm.cmd ci --prefix resources/ms-character
 npm.cmd test --prefix resources/ms-character
 ```
 
-Os testes usam PGlite embebido e um adaptador nativo simulado. O `node resources/ms-core/tools/smoke-runtime.js` também arranca este recurso no executável real.
+Os testes usam o `ms-sql` real e um adaptador nativo simulado. A suite do lobby corre uma vez por motor, com as tabelas do ms-core criadas antes (no mesmo schema de teste `ms_test`, criado pelo ms-sql):
+
+- **PostgreSQL:** sempre, em PGlite (em memória, via socket).
+- **MySQL / MariaDB:** só se `MS_SQL_TEST_MYSQL_URL` / `MS_SQL_TEST_MARIADB_URL` apontarem para um servidor real (o utilizador precisa de `CREATE`; as tabelas do ms-core e do ms-character no schema de teste `ms_test` são esvaziadas entre testes). Sem a variável o motor é saltado com a razão visível.
+
+ O `node resources/ms-core/tools/smoke-runtime.js` também arranca este recurso no executável real.

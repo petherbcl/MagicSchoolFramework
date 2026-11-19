@@ -28,7 +28,8 @@ Requisitos: Node ≥ 22.13 e PostgreSQL (o `docker-compose.yml` sobe um Postgres
 
 ```powershell
 docker compose up -d
-copy resources\ms-core\.env.example resources\ms-core\.env   # definir MS_DATABASE_URL
+copy resources\ms-sql\.env.example resources\ms-sql\.env     # definir MS_SQL_URL
+npm.cmd ci --prefix resources/ms-sql
 npm.cmd ci --prefix resources/ms-core
 .\ArcaneMPServer.exe
 ```

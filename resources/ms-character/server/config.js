@@ -18,16 +18,11 @@ function integer(env, key, fallback, min, max) {
   if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Invalid ${key}`);
   return value;
 }
-// Precedence: process env > ms-character/.env > ms-core/.env (shares MS_DATABASE_URL).
+// Precedence: process env > ms-character/.env. There is no database setting here: ms-sql owns the connection.
 function loadConfig(env = process.env, options = {}) {
   const own = options.envFile !== undefined ? options.envFile : env === process.env ? path.resolve(__dirname, "../.env") : null;
-  const core = options.coreEnvFile !== undefined ? options.coreEnvFile : env === process.env ? path.resolve(__dirname, "../../ms-core/.env") : null;
-  env = { ...readEnvFile(core), ...readEnvFile(own), ...env };
-  const databaseUrl = env.MS_DATABASE_URL || "";
-  if (databaseUrl && !/^postgres(?:ql)?:\/\//.test(databaseUrl)) throw new Error("MS_DATABASE_URL must be a PostgreSQL connection string");
+  env = { ...readEnvFile(own), ...env };
   return Object.freeze({
-    databaseUrl, databaseConfigured: Boolean(databaseUrl),
-    poolSize: integer(env, "MS_CHARACTER_POOL_SIZE", 3, 1, 20), queryTimeoutMs: 10000,
     maxCharacters: integer(env, "MS_MAX_CHARACTERS", 1, 1, 5),
     // Creation cap per account over 24 h, deleted characters included (M-01): create/delete cycles cannot grow the DB.
     maxCreationsPerDay: integer(env, "MS_MAX_CREATIONS_PER_DAY", 5, 1, 100),

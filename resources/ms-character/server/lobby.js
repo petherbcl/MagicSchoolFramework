@@ -134,7 +134,7 @@ function createLobby({ repository, config, game, core, emit = () => {}, logger =
     }));
   }
   const api = Object.freeze({
-    version: "0.2.0",
+    version: "0.4.0",
     isPlaying: id => { const l = lobbies.get(id); return Boolean(l && valid(l) && l.status === "playing"); },
     getSelected: id => { const l = lobbies.get(id); return l && valid(l) && l.status === "playing" ? clone(l.character) : null; },
     list: async id => { const l = lobbyOf(id); return (await repository.list(l.userId)).map(summary); },

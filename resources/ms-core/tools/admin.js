@@ -3,7 +3,11 @@
 const os = require("node:os");
 const { loadConfig } = require("../server/config");
 const { Repository } = require("../server/database/repository");
-const help = `PostgreSQL administration (requires MS_DATABASE_URL):
+// The database connection belongs to ms-sql: this tool builds its own createSql from resources/ms-sql/.env.
+const { loadConfig: loadSqlConfig } = require("../../ms-sql/server/config");
+const { createSql } = require("../../ms-sql/server");
+const CONNECT_TIMEOUT_MS = 10000;
+const help = `Database administration (PostgreSQL, MySQL or MariaDB; requires MS_SQL_URL in resources/ms-sql/.env):
   node resources/ms-core/tools/admin.js users
   node resources/ms-core/tools/admin.js show <numericId>
   node resources/ms-core/tools/admin.js approve <numericId>
@@ -18,14 +22,17 @@ Recovery requires operator verification of ownership, outside the game.`;
 async function main(args = process.argv.slice(2)) {
   const [command, userId, value, ...rest] = args;
   if (!command || command === "--help") { console.log(help); return; }
-  const config = loadConfig(); if (!config.databaseConfigured) throw new Error("Configure MS_DATABASE_URL");
+  const config = loadConfig(), sqlConfig = loadSqlConfig();
+  if (!sqlConfig.databaseConfigured) throw new Error("Configure MS_SQL_URL and MS_SQL_SCHEMA in resources/ms-sql/.env");
   let operator = process.env.USERNAME || process.env.USER || "local";
   try { operator = os.userInfo().username; } catch { /* Optional OS profile. */ }
   const actor = "console:" + String(operator).replace(/[\r\n\0]/g, "").slice(0, 100);
-  const db = new Repository(config);
+  const sql = createSql({ config: sqlConfig, logger: { info() {}, warn: message => console.error("[ms-sql] " + message), error: message => console.error("[ms-sql] " + message) } });
   try {
+    const db = new Repository(sql);
     if (command !== "users" && !userId) throw new Error("Missing numericId");
-    await db.createSchema();
+    await sql.awaitConnection(CONNECT_TIMEOUT_MS);
+    await db.createTables();
     switch (command) {
       case "users": console.log(JSON.stringify(await db.listUsers(), null, 2)); break;
       case "show": console.log(JSON.stringify(await db.getUser(userId), null, 2)); break;
@@ -44,7 +51,7 @@ async function main(args = process.argv.slice(2)) {
       case "reset-key": await db.revokeCredentials(userId, actor); console.log("Keys revoked. The next client with this account's identifiers receives a new key."); break;
       default: throw new Error("Unknown command");
     }
-  } finally { await db.close(); }
+  } finally { await sql.close(); }
 }
-if (require.main === module) main().catch(error => { console.error(error.code || "ADMIN_OPERATION_FAILED"); process.exitCode = 1; });
+if (require.main === module) main().catch(error => { console.error(error.code === "SQL_ERROR" ? "SQL_ERROR:" + error.kind : error.code || "ADMIN_OPERATION_FAILED"); process.exitCode = 1; });
 module.exports = { main };
