@@ -1,0 +1,26 @@
+{
+  "name": "ms-admin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MagicSchoolRP staff commands, restricted to one configurable ms-core role",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "mafiahub": {
+    "serverScripts": [
+      "server/main.js"
+    ],
+    "clientScripts": [
+      "client/main.js"
+    ],
+    "files": [],
+    "exports": [],
+    "resourceDependencies": [
+      "ms-core"
+    ],
+    "errorBehavior": "stop"
+  }
+}
