@@ -252,16 +252,16 @@ test("create sends the exported look with the pronoun kept across a body change,
   assert.equal(h.isActive(), false);
 });
 
-test("creator:cancel restores the look before cancel, then the lobby preview opens a fresh session", () => {
+test("creator:cancel back to the lobby keeps the session and camera: restores the look and the body frame only", () => {
   const h = harness();
   openLobby(h);
   h.viewHandlers["creator:begin"]();
   h.clear();
   h.viewHandlers["creator:cancel"]();
   const names = h.names();
-  assert.ok(names.indexOf("importLook") < names.indexOf("cancel"));
-  assert.ok(names.indexOf("cancel") < names.indexOf("restoreCamera"));
-  assert.ok(names.indexOf("restoreCamera") < names.indexOf("begin"));
+  assert.ok(names.includes("importLook"));
+  for (const forbidden of ["cancel", "freeze", "restoreCamera", "begin"]) assert.ok(!names.includes(forbidden), forbidden + " must not run");
+  assert.ok(names.includes("setCamera"));
   assert.equal(h.timerCount, 0);
 });
 

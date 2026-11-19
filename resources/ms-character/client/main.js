@@ -53,6 +53,9 @@ function setFrame(name) {
   const size = Web.getScreenSize();
   const width = size && Number.isFinite(size.width) && size.width > 0 ? size.width : REFERENCE_WIDTH;
   cameraTouched = true; // set first: a throw inside setCamera must still be undone by restoreCamera
+  // A turn made under one frame leaves the camera off-centre under another (face -> body), so every frame
+  // change starts from the initial angle.
+  unrotate();
   CreatorPreview.setCamera({ ...base, shift: base.shift * (width / REFERENCE_WIDTH) });
 }
 
@@ -211,6 +214,17 @@ function beginCreator() {
 }
 
 function cancelCreator() {
+  // Back to the lobby: keep the shared session (still frozen, camera never released) and only restore the account
+  // look, the initial angle and the body frame. Releasing and reopening goes through restoreCamera and the default
+  // camera first, which shows as a fast camera swing.
+  if (session !== null && pageReady && lastState && lastState.status === "lobby") {
+    clearTimers();
+    creatorOpen = false; pronoun = null; chosenVoice = null;
+    attempt("importLook(originalLook)", () => Creator.importLook(session.originalLook));
+    unrotate();
+    attempt("body frame", () => setFrame("body"));
+    return;
+  }
   // importLook(originalLook) + Creator.cancel() + restoreCamera() (plan §4.4), then the lobby preview starts a new session.
   release();
   if (pageReady && lastState && lastState.status === "lobby") openLobbySession();
