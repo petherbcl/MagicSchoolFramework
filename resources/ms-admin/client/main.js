@@ -62,4 +62,13 @@ Events.on("ms-admin:noclip", payload => {
   const data = typeof payload === "string" ? JSON.parse(payload) : payload;
   if (data && data.enabled === true) start(); else stop();
 });
+// The server asked for the camera pose (/coords while in noclip). Reply with the real view, not the body position.
+Events.on("ms-admin:camera-request", () => {
+  let view = null;
+  try { view = Camera.capture(); } catch { /* no camera available */ }
+  const position = (view && view.position) || LocalPlayer.getPosition();
+  const rotation = (view && view.rotation) || LocalPlayer.getControlRotation();
+  if (!position || !rotation) return;
+  Events.emitServer("ms-admin:camera", { x: position.x, y: position.y, z: position.z, yaw: rotation.yaw });
+});
 Events.on("resourceStop", name => { if (name === "ms-admin") stop(); });

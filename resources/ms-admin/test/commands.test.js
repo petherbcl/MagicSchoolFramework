@@ -22,10 +22,10 @@ function setup(roles = ["admin"], role = "admin") {
   return { admin, player, players, log };
 }
 
-test("coords prints x, y, z, w", () => {
+test("coords prints x, y, z, yaw", () => {
   const { admin, player, log } = setup();
   assert.equal(admin.handle(player, "coords"), true);
-  assert.deepEqual(log.chat, ["x: 1.23, y: -2, z: 4, w: 90"]);
+  assert.deepEqual(log.chat, ["x: 1.23, y: -2, z: 4, yaw: 90"]);
 });
 test("nc toggles noclip and restores visibility", () => {
   const { admin, player, log } = setup();
@@ -44,6 +44,41 @@ test("nc starts and stops the effect", () => {
   assert.equal(log.fx, true);
   admin.handle(player, "nc");
   assert.equal(log.fx, false);
+});
+test("coords in noclip asks the client and prints the camera pose", () => {
+  const { admin, player, log } = setup();
+  admin.handle(player, "nc");
+  admin.handle(player, "coords");
+  assert.deepEqual(log.emits.at(-1), ["ms-admin:camera-request", {}]);
+  assert.deepEqual(log.chat, ["Noclip ligado."]);
+  assert.equal(admin.cameraReply(player, { x: 10.126, y: 20, z: 30, yaw: 45 }), true);
+  assert.equal(log.chat.at(-1), "x: 10.13, y: 20, z: 30, yaw: 45");
+});
+test("camera replies are rejected without a request, twice, late, invalid or outside noclip", () => {
+  let now = 1000;
+  const { admin, player, log } = setup();
+  assert.equal(admin.cameraReply(player, { x: 1, y: 2, z: 3, yaw: 4 }), false);
+  admin.handle(player, "nc");
+  admin.handle(player, "coords");
+  assert.equal(admin.cameraReply(player, { x: "1", y: 2, z: 3, yaw: 4 }), false);
+  assert.equal(admin.cameraReply(player, { x: 1, y: 2, z: 3, yaw: 4 }), false, "request already consumed");
+  admin.handle(player, "coords");
+  admin.handle(player, "nc");
+  assert.equal(admin.cameraReply(player, { x: 1, y: 2, z: 3, yaw: 4 }), false, "noclip ended");
+  assert.equal(log.chat.some(line => line.startsWith("x:")), false);
+  void now;
+});
+test("a late camera reply is ignored", () => {
+  let now = 0;
+  const players = new Map([[1, { playerId: 1, sessionId: "10", roles: ["admin"] }]]);
+  const game = { hide: () => ({}), show() {}, startFx: () => ({}), stopFx() {}, emit() {}, position: () => null };
+  const out = [];
+  const admin = createAdmin({ config: { role: "admin" }, core: { Players: { get: id => players.get(id) || null } }, game, chat: (_p, t) => out.push(t), clock: () => now });
+  const player = { id: 1 };
+  admin.handle(player, "nc");
+  admin.handle(player, "coords");
+  now = 5000;
+  assert.equal(admin.cameraReply(player, { x: 1, y: 2, z: 3, yaw: 4 }), false);
 });
 test("fxlist filters the catalog", () => {
   const { admin, player, log } = setup();

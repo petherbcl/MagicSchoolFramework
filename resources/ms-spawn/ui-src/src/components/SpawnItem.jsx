@@ -41,7 +41,7 @@ export default function SpawnItem({ name, kind = "config", icon, selected = fals
         <Icon className="spawn-item__icon" />
         {showImg && <img ref={imgRef} className="spawn-item__img" src={iconUrl(icon)} alt="" width="72" height="72" decoding="async" draggable="false"
           onLoad={() => settle("ok")} onError={() => settle("fail")} />}
-        <span className="spawn-item__ring shadow-[inset_0_0_0_1px_rgba(11,20,28,.7),inset_0_0_8px_1px_rgba(4,8,12,.6)]" />
+        <span className="spawn-item__ring" />
       </span>
       <span className="spawn-item__name">{name}</span>
       <span className="spawn-item__slot" aria-hidden="true">

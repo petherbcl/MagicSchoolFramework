@@ -17,6 +17,7 @@ Events.on("resourceStart", name => {
 });
 Events.on("resourceStop", name => { if (name === "ms-admin" && timer) { clearInterval(timer); timer = null; } });
 Events.on("chatCommand", (player, message, command, args) => { if (admin) admin.handle(player, String(command).toLowerCase(), Array.isArray(args) ? args : []); });
+Events.onClient("ms-admin:camera", (player, payload) => { if (admin) admin.cameraReply(player, payload); });
 Events.on("ms:playerLeftGame", ({ playerId }) => {
   const player = PlayerManager.getById(playerId);
   if (admin && player) admin.clear(player);
