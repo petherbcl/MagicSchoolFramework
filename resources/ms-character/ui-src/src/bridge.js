@@ -32,6 +32,7 @@ import { useEffect, useState } from "react";
 // client → page
 //   "state"           { status, characters: LobbyCharacter[], maxCharacters, characterId }
 //                     status: "loading" | "lobby" | "creating" | "deleting" | "applying" | "playing" | "closed"
+//                     ("choosingSpawn" is handled by client/main.js and never reaches the page: ms-spawn owns the screen)
 //                     LobbyCharacter: { characterId, firstName, lastName, house,
 //                                       lastPlayedAt: string | null (ISO), look: LookJson | null }
 //   "notice"          { text }                              Server notice (pt-PT) for the alert zone.

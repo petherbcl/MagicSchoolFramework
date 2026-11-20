@@ -45,17 +45,22 @@ async function main() {
   copyResource(resource, destination);
   copyResource(path.join(root, "resources", "ms-sql"), path.join(directory, "resources", "ms-sql"));
   copyResource(path.join(root, "resources", "ms-character"), path.join(directory, "resources", "ms-character"));
+  // ms-spawn has no database; its .env is not copied (secrets rule), so the example defaults become the smoke .env.
+  copyResource(path.join(root, "resources", "ms-spawn"), path.join(directory, "resources", "ms-spawn"));
+  fs.copyFileSync(path.join(root, "resources", "ms-spawn", ".env.example"), path.join(directory, "resources", "ms-spawn", ".env"));
   // Optional: the sample gamemode is not part of every checkout.
   if (fs.existsSync(path.join(root, "resources", "my-gamemode"))) fs.cpSync(path.join(root, "resources", "my-gamemode"), path.join(directory, "resources", "my-gamemode"), { recursive: true });
   const probe = path.join(directory, "resources", "ms-smoke"); fs.mkdirSync(probe);
-  fs.writeFileSync(path.join(probe, "package.json"), JSON.stringify({ name: "ms-smoke", mafiahub: { serverScripts: ["main.js"], resourceDependencies: ["ms-sql", "ms-core", "ms-character"] } }));
+  fs.writeFileSync(path.join(probe, "package.json"), JSON.stringify({ name: "ms-smoke", mafiahub: { serverScripts: ["main.js"], resourceDependencies: ["ms-sql", "ms-core", "ms-character", "ms-spawn"] } }));
   fs.writeFileSync(path.join(probe, "main.js"), `Events.on("resourceStart", async name => {
     if(name!=="ms-smoke") return; const core=Exports.get("ms-core","Core");
     const sql=Exports.get("ms-sql","Sql");
     if(!sql || sql.dialect!=="postgres" || !sql.isReady()) throw new Error("Invalid ms-sql export");
     if(core.version!=="0.7.0" || core.Users.isReady(12345)!==false || await core.Users.hasPermission(12345,"admin")!==false) throw new Error("Invalid core export");
     const characters=Exports.get("ms-character","Characters");
-    if(!characters || characters.version!=="0.5.0" || characters.isPlaying(12345)!==false || characters.getSelected(12345)!==null) throw new Error("Invalid character export");
+    if(!characters || characters.version!=="0.6.0" || characters.isPlaying(12345)!==false || characters.getSelected(12345)!==null) throw new Error("Invalid character export");
+    const spawn=Exports.get("ms-spawn","Spawn");
+    if(!spawn || spawn.version!=="0.3.1" || spawn.isReady()!==true || spawn.locations().length!==6 || spawn.locations().some(l=>"x" in l)) throw new Error("Invalid spawn export");
     console.log("MS_CORE_POSTGRES_PROBE_OK"); });`);
   const engine = await PGlite.create(), server = new PGLiteSocketServer({ db: engine, host: "127.0.0.1", port: 0, maxConnections: 8 });
   let child, admin, adminSql;
@@ -76,7 +81,7 @@ async function main() {
       while (Date.now() < deadline && child.exitCode === null) { if (predicate(log())) return; await delay(100); }
       throw new Error("Runtime startup/reload failed: " + log().slice(-6000));
     }
-    await waitFor(text => text.includes("MS_CORE_POSTGRES_PROBE_OK") && text.includes("character lobby ready") && text.includes("Server successfully started"));
+    await waitFor(text => text.includes("MS_CORE_POSTGRES_PROBE_OK") && text.includes("character lobby ready") && text.includes("ms-spawn ready") && text.includes("Server successfully started"));
     adminSql = createSql({ config: loadSqlConfig({ MS_SQL_URL: connection, MS_SQL_SCHEMA: SMOKE_SCHEMA, MS_SQL_POOL_SIZE: "1" }, { envFile: null }) });
     await adminSql.awaitConnection(10000);
     admin = new Repository(adminSql);
@@ -92,7 +97,7 @@ async function main() {
     if (code !== 0 || log().toLowerCase().includes("[error]")) throw new Error(log().slice(-6000));
     const tables = await adminSql.scalar("SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='ms_characters'");
     if (!tables) throw new Error("ms-character tables missing");
-    console.log("PASS: PostgreSQL schema, numeric registration, external approval, ms-core and ms-character exports, ensure and clean shutdown");
+    console.log("PASS: PostgreSQL schema, numeric registration, external approval, ms-core, ms-character and ms-spawn exports, ensure and clean shutdown");
     console.log("Isolated runtime logs: " + directory);
   } finally {
     if (child && child.exitCode === null) { child.kill(); await once(child, "exit").catch(() => {}); }

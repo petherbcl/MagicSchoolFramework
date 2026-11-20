@@ -17,6 +17,11 @@ const Core = { Users: {
 }, Players: {
   enterGame: (id, input) => Exports.get("ms-core", "Core").Players.enterGame(id, input),
 } };
+// ms-spawn is optional: resolved lazily on every probe (it may start later, stop or fail), never a dependency.
+const Spawn = {
+  isReady: () => { try { return Exports.get("ms-spawn", "Spawn")?.isReady() === true; } catch { return false; } },
+  holds: (playerId, sessionId) => { try { const api = Exports.get("ms-spawn", "Spawn"); return typeof api?.holds === "function" ? api.holds(playerId, sessionId) === true : true; } catch { return false; } },
+};
 const messages = { INVALID_NAME: "Usa nomes com 2 a 32 letras.", INVALID_HOUSE: "Escolhe uma casa válida.",
   INVALID_CHARACTER: "Dados de personagem inválidos.", INVALID_LOOK: "Aparência inválida. Volta a tentar.",
   CHARACTER_LIMIT: "Atingiste o limite de personagens. Apaga uma personagem para criares outra.",
@@ -59,6 +64,9 @@ Events.on("ms:playerReady", ({ playerId, sessionId, userId }) => {
   const player = PlayerManager.getById(playerId);
   if (player) openLobby(player, { sessionId, userId });
 });
+// Answers of ms-spawn; the lobby re-validates playerId + sessionId + status before using them.
+Events.on("ms:spawnSelected", payload => { if (ready) lobby.spawnSelected(payload); });
+Events.on("ms:spawnCancelled", payload => { if (ready) lobby.spawnCancelled(payload); });
 Events.on("ms:sessionEnded", ({ sessionId }) => { if (ready) lobby.sessionEnded(sessionId); });
 Events.on("playerDisconnect", player => { rateNoticeAt.delete(player.id); if (lobby) lobby.disconnect(player.id).catch(() => console.error("[ms-character] disconnect save failed")); });
 Events.on("playerTeleportComplete", (player, requestId, status) => game?.complete(player.id, "teleport", requestId, status));
@@ -84,7 +92,7 @@ Events.on("resourceStart", async name => {
     if (typeof Exports.get("ms-core", "Core")?.Users?.isReady !== "function") throw new Error("MS_CORE_EXPORT_MISSING");
     repository = new Repository(sqlApi); await repository.createTables();
     game = createGameAdapter(config);
-    lobby = createLobby({ repository, config, game, core: Core, emit: (event, payload) => Events.emit(event, payload) });
+    lobby = createLobby({ repository, config, game, core: Core, spawn: Spawn, emit: (event, payload) => Events.emit(event, payload) });
     if (!Exports.register("Characters", lobby.api)) throw new Error("EXPORT_REGISTRATION_FAILED");
     ready = true;
     // Retention of soft-deleted characters (M-01): once now, then hourly.

@@ -2,6 +2,11 @@
 
 const { check, clone, CharacterError } = require("./validation");
 const HOLD = "ms-character:lobby";
+// Owner tag of ms-spawn's preview hold (part of the ms-spawn contract). ms-character releases it wherever it releases HOLD, so
+// a preview hold orphaned by a crashed or reloaded ms-spawn can never keep clamping a released player (SEC-07).
+// Releasing an owner that holds nothing is harmless (returns false).
+const SPAWN_PREVIEW_HOLD = "ms-spawn:preview";
+const releaseHolds = player => { player.release(HOLD); player.release(SPAWN_PREVIEW_HOLD); };
 
 // Native side of the lobby: private world while choosing, then restore and release.
 // Async native operations resolve through requestIds (playerTeleportComplete /
@@ -47,13 +52,14 @@ function createGameAdapter(config, { setTimeout: later = setTimeout, clearTimeou
     },
     send(player, eventName, payload) { player.emit(eventName, JSON.stringify(payload)); },
     kick(player, reason) { player.kick(reason); },
-    async apply(player, character, isCurrent, token) {
+    // `chosen` is the destination ms-spawn confirmed; without it the character's last Overland position (or the default spawn) is used.
+    async apply(player, character, isCurrent, token, chosen) {
       const ensure = () => check(isCurrent() && player.connected, "SESSION_EXPIRED");
       ensure();
       const position = character.state.location?.areaId === "Overland" ? character.state.location : null;
-      const destination = position || { ...config.spawn.position, yaw: config.spawn.yaw };
+      const destination = chosen || position || { ...config.spawn.position, yaw: config.spawn.yaw };
       // Stay in the private world and invisible while loading, but allow the native travel.
-      player.release(HOLD);
+      releaseHolds(player);
       if (player.location()?.areaId !== "Overland") {
         await travel(player, token, "map", () => player.travelToMap("/Game/Levels/Overland/Overland", {
           position: { x: destination.x, y: destination.y, z: destination.z }, yaw: destination.yaw || 0,
@@ -83,7 +89,7 @@ function createGameAdapter(config, { setTimeout: later = setTimeout, clearTimeou
       player.setSpawn({ position: { x: destination.x, y: destination.y, z: destination.z }, yaw: destination.yaw || 0 });
     },
     release(player, lobby) {
-      player.release(HOLD);
+      releaseHolds(player);
       player.setVirtualWorld(0);
       player.setVisible(lobby.previous.visible);
       player.setInvulnerable(lobby.previous.invulnerable);
@@ -111,7 +117,7 @@ function createGameAdapter(config, { setTimeout: later = setTimeout, clearTimeou
     },
     cancel(lobby) {
       for (const entry of [...pending.values()]) if (entry.token === lobby.token) entry.finish(new CharacterError("SESSION_EXPIRED"));
-      lobby.player.release(HOLD);
+      releaseHolds(lobby.player);
       lookFailed.delete(lobby.player.id);
     },
   };

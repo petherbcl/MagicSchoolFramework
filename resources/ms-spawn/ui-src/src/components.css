@@ -1,0 +1,396 @@
+/* Component styles for the ms-spawn page. Ported from resources/ms-character/ui-src/src/components.css (itself ported
+   from docs/design/mockups/components.css), reduced to what this screen uses, plus the ms-spawn block at the end
+   (from the <style> of docs/design/mockups/spawn.html). No new design tokens. Motion rules: transitions only on
+   opacity, transform and colours, at most 200 ms. Glows are static box-shadows on a pseudo-element whose OPACITY fades. */
+
+/* Literal values on purpose: Tailwind only emits the @theme variables that utilities use, so these
+   component tokens must not depend on them. Same values as docs/design/design-tokens.css. */
+:root {
+  --color-bg-base: #0B141C;
+  --color-bg-surface: #13202B;
+  --color-bg-inset: #0B141C;
+  --color-accent-primary: #D5B87B;
+  --color-accent-primary-hover: #E8CF96;
+  --color-accent-primary-active: #B89A5E;
+  --color-brass: #857150;
+  --color-focus: #F3E3B5;
+  --color-crimson: #8E2A22;
+  --color-crimson-bright: #A3342A;
+  --color-crimson-deep: #6E1D19;
+  --color-info: #86D3E3;
+  --color-danger: #F08A78;
+  --color-danger-bg: rgba(240, 138, 120, 0.10);
+  --color-info-bg: rgba(134, 211, 227, 0.08);
+  --color-text-primary: #EEE8D9;
+  --color-text-secondary: #B4B9BD;
+  --color-text-muted: #8A949C;
+  --color-text-accent: #D5B87B;
+  --color-text-on-accent: #0B141C;
+  --font-family-display: "Cinzel", Georgia, "Times New Roman", serif;
+  --font-family-body: Georgia, "Times New Roman", serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 2rem;
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --letter-spacing-title: 0.06em;
+  --letter-spacing-label: 0.1em;
+  --letter-spacing-eyebrow: 0.3em;
+  --line-height-tight: 1.15;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --target-min: 2.75rem;
+  --tab-size: 3.5rem;
+  --cta-ribbon: linear-gradient(180deg, #A3342A 0%, #8E2A22 55%, #6E1D19 100%);
+  --border-subtle: rgba(213, 184, 123, 0.16);
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-full: 9999px;
+  --shadow-glow: 0 0 0 1px rgba(232, 207, 150, 0.55), 0 0 14px rgba(213, 184, 123, 0.35);
+  --shadow-glow-arcane: 0 0 0 1px rgba(134, 211, 227, 0.6), 0 0 14px rgba(134, 211, 227, 0.35);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-smooth-out: cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --hover-lift: -2px;
+  --press-scale: 0.98;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.panel-header { position: relative; padding: var(--space-2) 0 var(--space-2) var(--space-12); }
+.panel-header__corner {
+  position: absolute; left: 0; top: 0; width: 3rem; height: 3rem; color: var(--color-accent-primary);
+}
+.panel-header__corner > svg { display: block; width: 100%; height: 100%; }
+.eyebrow {
+  margin: 0;
+  font: var(--font-weight-semibold) var(--font-size-xs) / 1 var(--font-family-display);
+  letter-spacing: var(--letter-spacing-eyebrow); text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.panel-title {
+  margin: var(--space-2) 0 0;
+  font: var(--font-weight-semibold) var(--font-size-3xl) / var(--line-height-tight) var(--font-family-display);
+  letter-spacing: var(--letter-spacing-title); text-transform: uppercase;
+  color: var(--color-text-accent);
+}
+.panel-subtitle { margin: var(--space-2) 0 0; color: var(--color-text-secondary); }
+/* The hairline is a CSS gradient (as in the mockup); the Divider ornament sits centred on top of it. */
+.divider {
+  display: flex; justify-content: center; align-items: center; height: 1rem; margin: var(--space-4) 0; color: var(--color-accent-primary);
+  background: linear-gradient(90deg, transparent, rgba(133, 113, 80, 0.7) 12%, rgba(133, 113, 80, 0.7) 88%, transparent) center / 100% 1px no-repeat;
+}
+.divider > svg { display: block; width: 100%; max-width: 30rem; height: 1rem; }
+
+/* Loading: keep exact dimensions. The idle and busy labels share one grid cell, so the width never changes. */
+.btn__stack { display: grid; }
+.btn__stack > * { grid-area: 1 / 1; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); }
+.btn__busy { visibility: hidden; }
+.btn[aria-busy="true"] .btn__idle { visibility: hidden; }
+.btn[aria-busy="true"] .btn__busy { visibility: visible; }
+.btn__reason { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.spinner { width: 1.125rem; height: 1.125rem; animation: ms-spin 0.9s linear infinite; }
+@keyframes ms-spin { to { transform: rotate(360deg); } }
+
+/* --------------------------------------------------------------------------
+   NOTICE (server feedback, role="alert")
+   -------------------------------------------------------------------------- */
+.notice-zone { min-height: 3.25rem; margin-top: var(--space-4); }
+.notice {
+  display: flex; align-items: flex-start; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-left: 2px solid var(--color-danger); background: var(--color-danger-bg);
+  color: var(--color-text-primary); font-size: var(--font-size-md);
+  animation: ms-notice-in var(--duration-normal) var(--ease-smooth-out);
+}
+.notice svg { width: 1.25rem; height: 1.25rem; flex: none; margin-top: 0.15rem; color: var(--color-danger); }
+.notice p { margin: 0; }
+.notice strong { color: var(--color-danger); font-weight: var(--font-weight-bold); }
+.notice--info { border-left-color: var(--color-info); background: var(--color-info-bg); }
+.notice--info svg, .notice--info strong { color: var(--color-info); }
+@keyframes ms-notice-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+:root {
+  --space-5: 1.25rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-display: 2.5rem;
+  --shadow-lg: 0 16px 32px -12px rgba(4, 8, 12, 0.7);
+  --ease-smooth-in: cubic-bezier(0.4, 0, 1, 1);
+  --color-scrim: rgba(6, 11, 16, 0.78);
+  --panel-w: max(34rem, 46vw);
+  --vignette-rgb: 11 20 28;
+  --vignette-panel: 0.94;
+  --vignette-panel-edge: 0.92;
+  --vignette-feather: 0.5;
+  --vignette-feather-width: 6rem;
+  --vignette-fade-width: min(18rem, 12vw);
+  --vignette-edge: 0.7;
+  --vignette-ellipse: 34% 62%;
+  --vignette-center-y: 46%;
+  --vignette-top: 0.45;
+  --vignette-band: 0.88;
+  --vignette-band-solid: 5rem;
+  --vignette-band-fade: 10rem;
+}
+
+/* Screens must sit above the fixed vignette (z-index 0). */
+.screen-layer { position: relative; z-index: 1; height: 100%; }
+.screen {
+  position: relative; z-index: 1;
+  display: grid; grid-template-columns: var(--panel-w) 1fr; grid-template-rows: 100vh;
+  height: 100vh; overflow: hidden;
+}
+.panel {
+  grid-column: 1; grid-row: 1;
+  position: relative; display: flex; flex-direction: column; min-height: 0;
+  padding: var(--space-8) var(--space-8) var(--space-6) var(--space-10);
+  background: transparent; /* D8: the world vignette darkens the panel side (single layer, no seam) */
+}
+.panel > * { position: relative; }
+.panel__scroll {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: var(--space-2) var(--space-3) var(--space-4) var(--space-2);
+  margin: 0 calc(var(--space-3) * -1) 0 calc(var(--space-2) * -1);
+  scrollbar-width: thin; scrollbar-color: var(--color-brass) transparent;
+}
+
+/* D8 world vignette: fixed, decorative, never catches pointer events. Gradients and opacity only (no backdrop-filter). */
+.world-vignette {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    linear-gradient(0deg,
+      rgb(var(--vignette-rgb) / var(--vignette-band)) 0,
+      rgb(var(--vignette-rgb) / var(--vignette-band)) var(--vignette-band-solid),
+      rgb(var(--vignette-rgb) / 0) var(--vignette-band-fade)),
+    linear-gradient(90deg,
+      rgb(var(--vignette-rgb) / var(--vignette-panel)) 0,
+      rgb(var(--vignette-rgb) / var(--vignette-panel-edge)) var(--panel-w),
+      rgb(var(--vignette-rgb) / var(--vignette-feather)) calc(var(--panel-w) + var(--vignette-feather-width)),
+      rgb(var(--vignette-rgb) / 0) calc(var(--panel-w) + var(--vignette-fade-width))),
+    linear-gradient(180deg,
+      rgb(var(--vignette-rgb) / var(--vignette-top)) 0,
+      rgb(var(--vignette-rgb) / 0) 22%),
+    radial-gradient(ellipse var(--vignette-ellipse) at calc(50% + var(--panel-w) / 2) var(--vignette-center-y),
+      rgb(var(--vignette-rgb) / 0) 0,
+      rgb(var(--vignette-rgb) / 0) 50%,
+      rgb(var(--vignette-rgb) / calc(var(--vignette-edge) * 0.5)) 78%,
+      rgb(var(--vignette-rgb) / var(--vignette-edge)) 100%);
+}
+.world-vignette::after { /* flat veil for the loading state; only opacity transitions */
+  content: ""; position: absolute; inset: 0;
+  background: rgb(var(--vignette-rgb) / 0.6); opacity: 0;
+  transition: opacity var(--duration-normal) var(--ease-smooth);
+}
+
+/* CTA "Começar a jornada": swallowtail ribbon, gold filigree, seal on top, two stars. Over the avatar column. */
+.cta {
+  position: relative; display: inline-grid; place-items: center;
+  min-width: 22rem; min-height: 4.25rem; padding: 0 4.5rem; margin-top: 1.4rem;
+  background: transparent; border: 0; cursor: pointer; color: var(--color-text-primary);
+  font: var(--font-weight-semibold) var(--font-size-2xl) / 1 var(--font-family-display);
+  letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap;
+  transition: transform var(--duration-fast) var(--ease-smooth);
+}
+.cta::before, .cta__shine { /* ribbon shape */
+  content: ""; position: absolute; inset: 0; z-index: 0;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 1.6rem) 50%, 100% 100%, 0 100%, 1.6rem 50%);
+  background: var(--cta-ribbon);
+}
+.cta__shine { background: linear-gradient(180deg, #B8402F 0%, #A3342A 55%, #7E231D 100%); opacity: 0; transition: opacity var(--duration-fast) var(--ease-smooth); }
+.cta::after { /* inner gold filigree lines */
+  content: ""; position: absolute; z-index: 1; inset: 0.45rem 2.6rem; pointer-events: none;
+  border-top: 1px solid var(--color-accent-primary); border-bottom: 1px solid var(--color-accent-primary); opacity: 0.85;
+}
+.cta__seal { position: absolute; z-index: 2; top: -1.6rem; left: 50%; width: 3rem; height: 3rem; margin-left: -1.5rem; }
+.cta__stars { position: absolute; z-index: 1; inset: 0 3.2rem; display: flex; justify-content: space-between; align-items: center; pointer-events: none; color: var(--color-accent-primary); }
+.cta__stars svg { width: 0.9rem; height: 0.9rem; }
+.cta .btn__stack { position: relative; z-index: 2; }
+.cta:hover:not([aria-busy="true"]) .cta__shine { opacity: 1; }
+.cta:hover:not([aria-busy="true"]) { transform: translateY(var(--hover-lift)); }
+.cta:active:not([aria-busy="true"]) { transform: scale(var(--press-scale)); }
+.cta:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 6px; }
+.cta[aria-busy="true"] { cursor: progress; }
+.cta[aria-busy="true"] .btn__idle { visibility: hidden; }
+.cta[aria-busy="true"] .btn__busy { visibility: visible; }
+.cta .spinner { width: 1.4rem; height: 1.4rem; }
+
+/* ==========================================================================
+   ms-spawn (docs/design/mockups/spawn.html, docs/design/handoff-ms-spawn.md)
+   ========================================================================== */
+:root { --color-accent-gradient: linear-gradient(180deg, #E8CF96 0%, #D5B87B 55%, #B89A5E 100%); }
+@keyframes ms-shimmer { to { transform: translateX(100%); } }
+
+/* Narrow panel, local override. Shared by the grid AND the vignette (both read --panel-w). */
+.screen--spawn, .world-vignette--spawn { --panel-w: max(26rem, 30vw); }
+
+/* Vignette variant: world as clean as possible. No text lives over the world. */
+.world-vignette--spawn {
+  --vignette-band: 0;
+  --vignette-feather-width: 3rem;
+  --vignette-fade-width: 10rem;
+  --vignette-edge: 0.3;
+  --vignette-top: 0.35;
+}
+
+/* No avatar column: the right side is the open world and stays empty. */
+.screen--spawn .panel__scroll { padding-top: var(--space-3); }
+
+/* ---- Location list ------------------------------------------------------ */
+.spawn-list { list-style: none; margin: 0; padding: var(--space-1); display: grid; gap: var(--space-3); }
+.spawn-sep { height: 1px; margin: var(--space-1) var(--space-2); background: linear-gradient(90deg, transparent, rgba(133, 113, 80, 0.7) 15%, rgba(133, 113, 80, 0.7) 85%, transparent); }
+
+.spawn-item {
+  position: relative; width: 100%; min-height: 3.5rem;
+  display: grid; grid-template-columns: auto 1fr 1.5rem; align-items: center; gap: var(--space-4);
+  padding: 0 var(--space-4) 0 var(--space-5);
+  background: linear-gradient(180deg, var(--color-bg-surface), #101B24);
+  border: 1px solid rgba(133, 113, 80, 0.75); border-radius: var(--radius-md);
+  color: var(--color-text-primary); text-align: left; cursor: pointer;
+  font: inherit;
+  transition: transform var(--duration-fast) var(--ease-smooth), border-color var(--duration-fast) var(--ease-smooth), background-color var(--duration-fast) var(--ease-smooth);
+}
+.spawn-item::after { /* static glow, opacity-faded */
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  box-shadow: var(--shadow-glow); opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-smooth);
+}
+.spawn-item__icon { width: 1.375rem; height: 1.375rem; color: var(--color-text-secondary); transition: color var(--duration-fast) var(--ease-smooth); }
+.spawn-item__name {
+  font: var(--font-weight-semibold) var(--font-size-lg) / 1.2 var(--font-family-display);
+  letter-spacing: 0.04em; overflow-wrap: anywhere;
+}
+/* Status slot: fixed 1.5rem so nothing shifts between spinner, check and empty. */
+.spawn-item__slot { position: relative; width: 1.5rem; height: 1.5rem; }
+.spawn-item__slot svg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity var(--duration-fast) var(--ease-smooth); }
+.spawn-item__check { color: var(--color-info); }
+.spawn-item__spin { color: var(--color-info); animation: ms-spin 0.9s linear infinite; }
+.spawn-item__progress { /* indeterminate line while the camera flies / the area streams */
+  position: absolute; left: 6px; right: 6px; bottom: 3px; height: 2px; overflow: hidden; opacity: 0; pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-smooth);
+}
+.spawn-item__progress::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--color-info), transparent);
+  animation: ms-shimmer 1.4s var(--ease-smooth) infinite;
+}
+
+/* Hover (preview): gold, lifted. Selected keeps cyan (never recoloured by hover). */
+.spawn-item:hover:not(:disabled) { border-color: var(--color-accent-primary); transform: translateY(var(--hover-lift)); }
+.spawn-item:hover:not(:disabled)::after { opacity: 0.6; }
+.spawn-item:hover:not(:disabled) .spawn-item__icon { color: var(--color-accent-primary-hover); }
+.spawn-item:active:not(:disabled) { transform: scale(0.99); }
+.spawn-item:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+/* Selected: cyan border + glow + check (arrived) or spinner + line (flying). Never colour alone. */
+.spawn-item[aria-pressed="true"], .spawn-item[aria-pressed="true"]:hover:not(:disabled) { border-color: var(--color-info); }
+.spawn-item[aria-pressed="true"]::after, .spawn-item[aria-pressed="true"]:hover:not(:disabled)::after { box-shadow: var(--shadow-glow-arcane); opacity: 1; }
+.spawn-item[aria-pressed="true"] .spawn-item__icon, .spawn-item[aria-pressed="true"]:hover:not(:disabled) .spawn-item__icon { color: var(--color-info); }
+.spawn-item[aria-pressed="true"] .spawn-item__check { opacity: 1; }
+.spawn-item.is-flying .spawn-item__check { opacity: 0; }
+.spawn-item.is-flying .spawn-item__spin { opacity: 1; }
+.spawn-item.is-flying .spawn-item__progress { opacity: 1; }
+/* Disabled (applying, session lost): not interactive. */
+.spawn-item:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.spawn-item:disabled::after { opacity: 0; }
+.spawn-item[aria-pressed="true"]:disabled { opacity: 1; } /* the chosen one stays readable while applying */
+.spawn-item[aria-pressed="true"]:disabled::after { opacity: 1; }
+
+/* "Última localização": star + gold accent bar + faint gold tint. */
+.spawn-item--last { background: linear-gradient(180deg, #1B2A2E, #101B24); }
+.spawn-item--last::before {
+  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 0 2px 2px 0;
+  background: var(--color-accent-gradient);
+}
+.spawn-item--last .spawn-item__icon { color: var(--color-accent-primary); }
+.spawn-item--last .spawn-item__name { color: var(--color-accent-primary-hover); }
+.spawn-item--last[aria-pressed="true"] .spawn-item__name { color: var(--color-text-primary); }
+
+/* ---- Status line + empty state ------------------------------------------ */
+.spawn-status {
+  min-height: 1.75rem; margin: var(--space-3) 0 0; display: flex; align-items: center; gap: var(--space-2);
+  font-size: var(--font-size-sm); color: var(--color-text-secondary);
+}
+.spawn-status svg { width: 1rem; height: 1rem; flex: none; color: var(--color-info); }
+.spawn-status .spinner { animation: ms-spin 0.9s linear infinite; }
+.spawn-status strong { color: var(--color-text-primary); font-weight: var(--font-weight-bold); }
+.spawn-empty {
+  display: grid; gap: var(--space-2); justify-items: center; text-align: center;
+  padding: var(--space-8) var(--space-6);
+  border: 1px dashed var(--color-brass); border-radius: var(--radius-md); color: var(--color-text-secondary);
+}
+.spawn-empty svg { width: 2rem; height: 2rem; color: var(--color-text-muted); }
+.spawn-empty strong { font: var(--font-weight-semibold) var(--font-size-lg) / 1.2 var(--font-family-display); letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-accent); }
+.spawn-empty p { margin: 0; }
+
+/* ---- Confirm CTA, fitted to the narrow panel ----------------------------- */
+.spawn-footer { padding-top: var(--space-1); }
+.cta--panel { width: 100%; min-width: 0; padding: 0 3.25rem; }
+/* Idle and busy labels share one cell sized by the longer one: keep the busy label short enough to fit the 26 rem panel. */
+.cta--panel .btn__stack { width: 100%; }
+.cta--panel .btn__stack > * { min-width: 0; white-space: nowrap; }
+.cta--panel .btn__busy { font-size: 0.875rem; letter-spacing: 0.04em; }
+.cta:disabled { opacity: 0.5; cursor: not-allowed; }
+.cta:disabled:hover .cta__shine { opacity: 0; }
+.cta:disabled:hover, .cta:disabled:active { transform: none; }
+
+@media (max-height: 800px) {
+  .panel { padding-top: var(--space-5); padding-bottom: var(--space-4); }
+  .panel-title { font-size: 1.625rem; }
+  .cta { min-height: 3.75rem; }
+  .spawn-item { min-height: 3rem; }
+  .spawn-list { gap: var(--space-2); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spawn-item:hover:not(:disabled) { transform: none; }
+}
+
+/* ---- CHG-02: total opaque cover (STORY-05.07, handoff §9.4) -------------------------------------------------------
+   Copy of the ms-character `.loading-screen` language (no cross-resource imports), plus the `.spawn-cover` block.
+   Always mounted, fixed, opaque, above the panel (z-index 1) and the vignette (0). SHOW is instant (`transition: none`,
+   no entry animation: not one world pixel may show while it appears). HIDE fades opacity only, 150 ms, and the
+   visibility flips after the fade. Seal and divider are classes, never inline styles (CSP 'self'). No new tokens. */
+.loading-screen {
+  position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; text-align: center;
+  background: radial-gradient(ellipse 60% 50% at 50% 45%, #162836 0%, #0F1B25 55%, #0B141C 100%);
+}
+.loading-screen__seal { display: block; width: 4.5rem; height: 4.5rem; margin: 0 auto; }
+.loading-screen__title {
+  margin: var(--space-6) 0 var(--space-2);
+  font: var(--font-weight-semibold) var(--font-size-display) / 1.15 var(--font-family-display);
+  letter-spacing: var(--letter-spacing-title); text-transform: uppercase; color: var(--color-text-accent);
+}
+.loading-screen__sub { margin: 0; color: var(--color-text-secondary); }
+.dots { display: inline-flex; gap: var(--space-3); margin-top: var(--space-6); }
+.dots i { width: 0.6rem; height: 0.6rem; background: var(--color-accent-primary); transform: rotate(45deg); animation: ms-pulse-dot 1.2s ease-in-out infinite; }
+.dots i:nth-child(2) { animation-delay: 0.2s; }
+.dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes ms-pulse-dot { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+
+.spawn-cover {
+  z-index: 40; animation: none;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-smooth-in), visibility 0s linear var(--duration-fast);
+}
+.spawn-cover.is-on { opacity: 1; visibility: visible; pointer-events: auto; cursor: progress; transition: none; }
+.spawn-cover__seal { display: block; width: 4.5rem; height: 4.5rem; margin: 0 auto; }
+.spawn-cover__divider { width: min(30rem, 80vw); margin: 0 auto; }
+.spawn-cover .loading-screen__sub { min-height: 1.5rem; }
+@media (prefers-reduced-motion: reduce) {
+  /* The global reduce block would freeze the dots at their dim 100% keyframe: show them steady and fully lit. */
+  .spawn-cover .dots i { animation: none; opacity: 1; }
+  .spawn-cover { transition-delay: 0s; }
+}

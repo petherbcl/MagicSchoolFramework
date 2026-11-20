@@ -1,0 +1,33 @@
+{
+  "name": "ms-spawn",
+  "version": "0.3.1",
+  "private": true,
+  "description": "MagicSchoolRP spawn selection: the player flies the camera over configured locations and confirms where to appear",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "build:ui": "npm --prefix ui-src run build",
+    "dev:ui": "npm --prefix ui-src run dev"
+  },
+  "mafiahub": {
+    "serverScripts": [
+      "server/main.js"
+    ],
+    "clientScripts": [
+      "client/main.js"
+    ],
+    "files": [
+      "client/ui/**"
+    ],
+    "exports": [
+      "Spawn"
+    ],
+    "resourceDependencies": [
+      "ms-core",
+      "ms-character"
+    ],
+    "errorBehavior": "stop"
+  }
+}

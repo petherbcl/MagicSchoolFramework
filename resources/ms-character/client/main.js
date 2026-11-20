@@ -352,9 +352,16 @@ function closeView() {
   if (view !== null) Web.destroyView(view);
   view = null; pageReady = false;
 }
+// ms-spawn (optional) owns the screen between choosingSpawn and playing: the page stays closed and the controls stay
+// disabled (ms-spawn touches neither), whether the choice ends in a selection or a cancellation.
+let handedOver = false;
 function show(state) {
   lastState = state;
+  if (state.status === "playing" || state.status === "closed") handedOver = false;
   if (state.status === "playing") { release(); closeView(); setControls(true); return; }
+  if (state.status === "choosingSpawn") { handedOver = true; setControls(false); release(); closeView(); return; }
+  if (handedOver && state.status === "applying") return;
+  if (state.status === "lobby") handedOver = false;
   setControls(false);
   if (view === null) {
     view = Web.createView("fw://resources/ms-character/client/ui/index.html", { focus: true });

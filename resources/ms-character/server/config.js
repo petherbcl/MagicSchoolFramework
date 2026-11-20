@@ -18,6 +18,15 @@ function integer(env, key, fallback, min, max) {
   if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Invalid ${key}`);
   return value;
 }
+// "x,y,z,yaw" (centimetres and degrees), e.g. "349817,-466133,-84908,123". Strict: anything else fails closed.
+function point(env, key, fallback) {
+  if (env[key] === undefined || env[key] === "") return fallback;
+  const parts = String(env[key]).split(",").map(s => s.trim());
+  const nums = parts.map(Number);
+  if (parts.length !== 4 || parts.some(s => s === "") || !nums.every(Number.isFinite)
+    || nums.slice(0, 3).some(n => Math.abs(n) > 1e7) || Math.abs(nums[3]) > 360) throw new Error(`Invalid ${key}`);
+  return { position: { x: nums[0], y: nums[1], z: nums[2] }, yaw: nums[3] };
+}
 // Precedence: process env > ms-character/.env. There is no database setting here: ms-sql owns the connection.
 function loadConfig(env = process.env, options = {}) {
   const own = options.envFile !== undefined ? options.envFile : env === process.env ? path.resolve(__dirname, "../.env") : null;
@@ -33,8 +42,9 @@ function loadConfig(env = process.env, options = {}) {
     lobbyWorldBase: 3100000000,
     // Where the player waits while choosing, and where a new character first appears (Overland).
     // Chosen by the user with /pos (docs/ms-character-runtime-findings.md §4.1). Note: player.hold has no yaw option.
-    lobby: { position: { x: 349817, y: -466133, z: -84908 }, yaw: 123 },
-    spawn: { position: { x: 366784, y: -461527, z: -82610 }, yaw: -130 },
+    // Configurable as "x,y,z,yaw" through MS_LOBBY_POSITION and MS_SPAWN_POSITION (defaults below).
+    lobby: point(env, "MS_LOBBY_POSITION", { position: { x: 349817, y: -466133, z: -84908 }, yaw: 123 }),
+    spawn: point(env, "MS_SPAWN_POSITION", { position: { x: 366784, y: -461527, z: -82610 }, yaw: -130 }),
   });
 }
 module.exports = { loadConfig };

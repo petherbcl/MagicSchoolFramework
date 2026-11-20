@@ -1,5 +1,4 @@
-import CtaSeal from "./ornaments/CtaSeal.jsx";
-import Divider from "./ornaments/Divider.jsx";
+import LoadingCover from "./LoadingCover.jsx";
 import Screen from "./Screen.jsx";
 import Skeleton from "./Skeleton.jsx";
 
@@ -7,22 +6,12 @@ import Skeleton from "./Skeleton.jsx";
 //   variant "characters" (status "loading"): the lobby layout with two skeleton cards; the world vignette is the
 //                        --loading variant (rendered by App). `exiting` plays the 150 ms exit when the lobby or
 //                        the creator replaces it.
-//   variant "entering"   (status "applying"): an opaque full-screen "A entrar em Hogwarts" with the seal.
+//   variant "entering"   (status "applying"): an opaque full-screen "A entrar em Hogwarts" with the seal (LoadingCover).
 const SKELETON_LINES = [["55%", "35%"], ["45%", "30%"]];
 
 export default function Loading({ variant = "characters", exiting = false }) {
   if (variant === "entering") {
-    return (
-      <section className="loading-screen" aria-labelledby="entering-title" aria-busy="true">
-        <div>
-          <CtaSeal className="loading-screen__seal" />
-          <h1 className="loading-screen__title" id="entering-title">A entrar em Hogwarts</h1>
-          <div className="divider loading-screen__divider" aria-hidden="true"><Divider /></div>
-          <p className="loading-screen__sub" role="status">A carregar a personagem. Aguarda um momento…</p>
-          <div className="dots" aria-hidden="true"><i /><i /><i /></div>
-        </div>
-      </section>
-    );
+    return <LoadingCover title="A entrar em Hogwarts" sub="A carregar a personagem. Aguarda um momento…" />;
   }
   return (
     <Screen titleId="loading-title" title="A carregar as tuas personagens" subtitle="Aguarda um momento…" busy anchor={false}

@@ -1,14 +1,16 @@
 # ms-character
 
-Lobby de personagens do MagicSchoolRP (versão 0.5.0). Depende do [ms-core](../ms-core/README.md) e do [ms-sql](../ms-sql/README.md): o jogador só chega aqui depois de a conta estar aprovada e a chave local verificada.
+Lobby de personagens do MagicSchoolRP (versão 0.6.0). Depende do [ms-core](../ms-core/README.md) e do [ms-sql](../ms-sql/README.md): o jogador só chega aqui depois de a conta estar aprovada e a chave local verificada.
 
 ## Fluxo
+
+Estados do lobby: `loading → lobby ⇄ creating | deleting → [choosingSpawn →] applying → playing → closed`. O estado `choosingSpawn` (0.6.0) só existe com o ms-spawn pronto; o script cliente fecha então a página do ms-character (a UI do ms-spawn assume o ecrã) e mantém-na fechada até `playing`.
 
 1. O ms-core emite `ms:playerReady`. O ms-character volta a confirmar a sessão e leva o jogador para o **lobby**: um mundo privado, invisível, invulnerável e preso ao ponto do lobby.
 2. A UI do lobby mostra as personagens da conta, começando pela última jogada:
    - **Sem personagens:** abre diretamente o criador de personagens.
    - **Com personagens:** o jogador escolhe uma com "Jogar", cria outra (até `MS_MAX_CHARACTERS`) ou apaga uma. Ao focar um cartão, a personagem aparece em pré-visualização com a aparência guardada.
-3. Ao escolher, o servidor confirma que a personagem pertence à conta e restaura-a: viagem para Overland, inventário, look, casa e posição guardada. Uma personagem nova aparece no spawn.
+3. Ao escolher, o servidor confirma que a personagem pertence à conta. Se o [ms-spawn](../ms-spawn/README.md) estiver pronto (`Exports.get("ms-spawn", "Spawn")?.isReady()`, resolvido a cada uso; é opcional e não é dependência), o lobby passa a `choosingSpawn`: emite `ms:spawnSelectionRequested { playerId, sessionId, userId, characterId, last }` (`last` só se a personagem tem posição guardada em Overland, senão `null`) e mantém o jogador no lobby, sem temporizador para um jogador parado, até chegar `ms:spawnSelected { playerId, sessionId, destination }` ou `ms:spawnCancelled { playerId, sessionId, reason }`. No tick do autosave, se o ms-spawn deixou de estar pronto ou já não guarda esta seleção (`Spawn.holds`, p. ex. depois de um `ensure ms-spawn`), o jogador entra com o destino por omissão (vigilância; pedidos com menos de 5 s não são avaliados). `ms:spawnSelected` com coordenadas fora de ±1e7 (ou `yaw` fora de ±360) é tratado como sem destino. Respostas com outro `sessionId` ou fora de `choosingSpawn` são ignoradas. Sem ms-spawn pronto (ou em cancelamento) o destino é o de sempre. Depois restaura a personagem: viagem para Overland, inventário, look, casa e posição guardada. Uma personagem nova aparece no spawn.
 4. O jogador sai do lobby para o mundo 0, o recurso avisa o ms-core com `Core.Players.enterGame(playerId, { sessionId, characterId })` (o core volta a validar a conta e guarda em memória `userId`, `playerId`, `characterId` e roles; requer ms-core 0.7.0) e emite `ms:characterReady`.
 5. A personagem é guardada automaticamente (`MS_SAVE_INTERVAL_SECONDS`) e quando o jogador sai. Os saves usam controlo de versão, por isso um save desatualizado é recusado.
    - **Posição:** só se restauram posições do Overland. Fora do Overland (castelo, masmorras, durante cargas) o save mantém a última posição Overland conhecida.
