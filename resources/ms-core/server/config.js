@@ -62,7 +62,9 @@ function loadConfig(env = process.env, options = {}) {
     quarantineWorldBase: 3000000000,
     spawn: { position: { x: 385396, y: -480395.75, z: -77138.5 }, yaw: -126.9 },
     rolePermissions: { player: ["users.metadata.self"],
-      moderator: ["users.read", "allowlist.manage", "bans.manage"], admin: ["*"] },
+      moderator: ["users.read", "allowlist.manage", "bans.manage"], admin: ["*"],
+      // Roles ms-character gives every character for its house; no permissions of their own, but known to Roles.set and the admin tool.
+      gryffindor: [], hufflepuff: [], ravenclaw: [], slytherin: [], unaffiliated: [] },
   });
 }
 module.exports = { loadConfig };

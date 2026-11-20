@@ -1,6 +1,6 @@
 "use strict";
 const { schemaFor } = require("./schema");
-const { check, json, characterInput, lookInput, publicId } = require("../validation");
+const { check, json, characterInput, lookInput, publicId, houseRole } = require("../validation");
 
 const SCHEMA_LOCK = "ms-character:schema";
 const MAX_DEADLOCK_RETRIES = 2;
@@ -37,16 +37,38 @@ class Repository {
       // ms-core's tables live in the same schema, the one ms-sql bound this connection to (no schema name here).
       const current = this.sql.dialect === "postgres" ? "current_schema()" : "DATABASE()";
       check(await db.single(`SELECT 1 AS present FROM information_schema.tables WHERE table_schema=${current} AND table_name='ms_users'`), "MS_CORE_SCHEMA_MISSING");
+      // ms-core owns the character roles table; the house role of every character is saved there.
+      check(await db.single(`SELECT 1 AS present FROM information_schema.tables WHERE table_schema=${current} AND table_name='ms_character_roles'`), "MS_CORE_SCHEMA_MISSING");
       for (const statement of statements) await db.query(statement);
     });
   }
-  map(row) {
-    return row ? { characterId: String(row.id), userId: String(row.user_id), firstName: row.first_name, lastName: row.last_name,
+  map(row, roles = []) {
+    return row ? { roles, characterId: String(row.id), userId: String(row.user_id), firstName: row.first_name, lastName: row.last_name,
       house: row.house, state: row.state, version: row.version, lastPlayedAt: row.last_played_at ? row.last_played_at.toISOString() : null } : null;
   }
   // Soft-deleted characters are hidden unless explicitly requested (no current caller does).
   async get(id, { includeDeleted = false } = {}) {
-    return this.map(await this.sql.single(`SELECT * FROM ms_characters WHERE id=?${includeDeleted === true ? "" : " AND deleted_at IS NULL"}`, [publicId(id)]));
+    const row = await this.sql.single(`SELECT * FROM ms_characters WHERE id=?${includeDeleted === true ? "" : " AND deleted_at IS NULL"}`, [publicId(id)]);
+    return this.map(row, row ? await this.roles(row.id) : []);
+  }
+  // Roles of a character, sorted (the table belongs to ms-core, which also adds the implicit "player"). `db` is the pool or a transaction.
+  async roles(id, db = this.sql) {
+    return (await db.query("SELECT role FROM ms_character_roles WHERE character_id=? ORDER BY role", [publicId(id)])).map(row => row.role);
+  }
+  async grantRole(db, id, role, actor) {
+    if (await db.single("SELECT 1 AS present FROM ms_character_roles WHERE character_id=? AND role=?", [id, role])) return false;
+    await db.query("INSERT INTO ms_character_roles(character_id,role) VALUES(?,?)", [id, role]);
+    if (actor === null) return true; // the creation already has its own audit row
+    await db.query("INSERT INTO ms_audit_log(actor,action,user_id,details) VALUES(?,?,(SELECT user_id FROM ms_characters WHERE id=?),?)",
+      [actor, "character.role.granted", id, JSON.stringify({ characterId: String(id), role })]);
+    return true;
+  }
+  // Gives the character the role of its house if it is missing (characters created before the roles existed) and
+  // returns all of its roles. Idempotent; two concurrent calls end with the same single row.
+  async ensureHouseRole(id, house) {
+    const characterId = publicId(id), role = houseRole(house);
+    try { return await this.transaction(async db => { await this.grantRole(db, characterId, role, "system:ms-character"); return this.roles(characterId, db); }); }
+    catch (error) { if (error?.kind === "UNIQUE_VIOLATION") return this.roles(characterId); throw error; }
   }
   // Active characters only, most recently played first, so the lobby can highlight the last character.
   // (col IS NULL) sorts never-played characters last without NULLS LAST, which MySQL lacks.
@@ -69,9 +91,11 @@ class Repository {
       const id = await db.insert("INSERT INTO ms_characters(user_id,first_name,last_name,house,state) VALUES(?,?,?,?,?)",
         [userId, value.firstName, value.lastName, value.house, encoded]);
       const row = await db.single("SELECT * FROM ms_characters WHERE id=?", [id]);
+      // The house chosen at creation becomes the character's role, saved in the same transaction.
+      await this.grantRole(db, row.id, houseRole(value.house), null);
       await db.query("INSERT INTO ms_audit_log(actor,action,user_id,details) VALUES(?,?,?,?)",
         ["user:" + userId, "character.created", userId, JSON.stringify({ characterId: String(row.id) })]);
-      return this.map(row);
+      return this.map(row, await this.roles(row.id, db));
     });
   }
   async touch(id, userId) {
@@ -104,7 +128,12 @@ class Repository {
   }
   // Retention (M-01): removes characters deleted more than `days` days ago. Returns how many.
   async purgeDeleted(days) {
-    return this.sql.update("DELETE FROM ms_characters WHERE deleted_at IS NOT NULL AND deleted_at < ?", [new Date(this.clock() - days * DAY_MS)]);
+    const cutoff = new Date(this.clock() - days * DAY_MS);
+    // ms_character_roles has no foreign key (it belongs to ms-core), so the roles of the purged characters go first.
+    return this.transaction(async db => {
+      await db.update("DELETE FROM ms_character_roles WHERE character_id IN (SELECT id FROM ms_characters WHERE deleted_at IS NOT NULL AND deleted_at < ?)", [cutoff]);
+      return db.update("DELETE FROM ms_characters WHERE deleted_at IS NOT NULL AND deleted_at < ?", [cutoff]);
+    });
   }
 }
 module.exports = { Repository };

@@ -489,6 +489,35 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
     assert.ok(await f.repository.get(active.characterId));
   });
 
+  test("creating a character saves the role of the chosen house in ms_character_roles", async t => {
+    const f = await fixture(t, {}, { maxCharacters: 3, maxCreationsPerDay: 9 }); await f.join();
+    const roles = id => sql.query("SELECT role FROM ms_character_roles WHERE character_id=? ORDER BY role", [id]);
+    const a = await f.lobby.create(1, { ...ana, house: "Slytherin" }); f.advance(1000);
+    const b = await f.lobby.create(1, { ...ana, firstName: "Rita", house: "Unaffiliated" });
+    assert.deepEqual((await roles(a.characterId)).map(row => row.role), ["slytherin"]);
+    assert.deepEqual((await roles(b.characterId)).map(row => row.role), ["unaffiliated"]);
+    assert.deepEqual((await f.repository.get(a.characterId)).roles, ["slytherin"]);
+    f.advance(1000); await assert.rejects(f.lobby.create(1, { ...ana, house: "Durmstrang" }), { code: "INVALID_HOUSE" });
+    assert.equal(Number(await sql.scalar("SELECT count(*) FROM ms_character_roles")), 2, "a refused creation saves no role");
+  });
+  test("selecting keeps the roles in memory and gives old characters the role of their house", async t => {
+    const f = await fixture(t); await f.join();
+    const id = String(await sql.insert("INSERT INTO ms_characters(user_id,first_name,last_name,house,state) VALUES(1,'Old','One','Hufflepuff',?)", [EMPTY_STATE]));
+    assert.deepEqual(await f.repository.roles(id), [], "created before the roles existed");
+    f.advance(1000); await f.lobby.select(1, id);
+    assert.deepEqual(f.lobby.api.getSelected(1).roles, ["hufflepuff"]);
+    assert.deepEqual(await f.repository.roles(id), ["hufflepuff"]);
+    assert.deepEqual(await f.repository.ensureHouseRole(id, "Hufflepuff"), ["hufflepuff"], "idempotent");
+    assert.equal(Number(await sql.scalar("SELECT count(*) FROM ms_character_roles")), 1);
+  });
+  test("purging a deleted character removes its roles", async t => {
+    const f = await fixture(t); await f.join();
+    const c = await f.lobby.create(1, ana); f.advance(1000); await f.lobby.delete(1, c.characterId);
+    await sql.update("UPDATE ms_characters SET deleted_at=? WHERE id=?", [new Date(Date.now() - 31 * 86400 * 1000), c.characterId]);
+    assert.equal(await f.repository.purgeDeleted(30), 1);
+    assert.equal(Number(await sql.scalar("SELECT count(*) FROM ms_character_roles")), 0);
+  });
+
   test("deleting or selecting a character of another account leaves an audit trace (L-06)", async t => {
     const f = await fixture(t, {}, { maxCharacters: 2 }); await f.join();
     const mine = await f.lobby.create(1, ana);

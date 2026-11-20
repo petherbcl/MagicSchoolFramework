@@ -30,6 +30,8 @@ function characterInput(value) {
   check(HOUSES.includes(value.house), "INVALID_HOUSE");
   return { firstName: name(value.firstName), lastName: name(value.lastName), house: value.house };
 }
+// The role every character receives for its house (ms_character_roles): gryffindor, unaffiliated...
+const houseRole = house => { check(HOUSES.includes(house), "INVALID_HOUSE"); return house.toLowerCase(); };
 // LookJson (#api-client-lookjson), plan §4.3. Every key is either allowed, stripped or imposed by the server.
 const LOOK_MAX_BYTES = 16 * 1024;
 // IDs of the game's assets (HairMale001, GA_Back_014, M_Facial_zBase_FullBeard): no path or URL characters (L-04).
@@ -93,4 +95,4 @@ function publicId(value) {
   check(typeof id === "string" && /^[1-9][0-9]{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n, "INVALID_ID");
   return id;
 }
-module.exports = { CharacterError, check, clone, json, characterInput, lookInput, publicId, HOUSES, VOICE_PITCH_MAX };
+module.exports = { CharacterError, check, clone, json, characterInput, lookInput, publicId, HOUSES, houseRole, VOICE_PITCH_MAX };

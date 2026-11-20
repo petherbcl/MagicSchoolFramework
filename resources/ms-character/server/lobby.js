@@ -58,7 +58,8 @@ function createLobby({ repository, config, game, core, spawn = { isReady: () => 
     try { state = game.capture(l.player, clone(l.character.state)); }
     catch (error) { return Promise.reject(error); }
     const task = l.saveChain.catch(() => {}).then(async () => {
-      l.character = await repository.save(l.character.characterId, l.userId, l.character.version, state);
+      const roles = l.character.roles || []; // the save returns the row only: the roles stay in memory
+      l.character = { ...(await repository.save(l.character.characterId, l.userId, l.character.version, state)), roles };
       return true;
     });
     l.saveChain = task; return task;
@@ -119,6 +120,8 @@ function createLobby({ repository, config, game, core, spawn = { isReady: () => 
     try {
       character = await repository.get(publicId(characterId)); ensure(l);
       if (!character || character.userId !== l.userId) await denied(l, "character.select_denied", characterId, new CharacterError("CHARACTER_NOT_FOUND"));
+      // Old characters get the role of their house too; the roles stay in memory with the selected character.
+      character.roles = await repository.ensureHouseRole(character.characterId, character.house); ensure(l);
     } catch (error) {
       if (lobbies.get(l.playerId) === l && l.status === "applying") { l.status = "lobby"; send(l); }
       throw error;

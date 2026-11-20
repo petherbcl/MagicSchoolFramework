@@ -54,7 +54,7 @@ async function startDb(target) {
     async another() { const extra = newSql(server.url); owned.push(extra); await extra.awaitConnection(10000); return extra; },
     // Empties ms-character and ms-core tables and restarts the identities. Requires ms-character's schema to exist.
     async resetTables() {
-      if (!mysqlFamily) { await sql.query("TRUNCATE ms_characters, ms_users RESTART IDENTITY CASCADE"); return; }
+      if (!mysqlFamily) { await sql.query("TRUNCATE ms_character_roles, ms_characters, ms_users RESTART IDENTITY CASCADE"); return; }
       // FOREIGN_KEY_CHECKS is per connection: run everything on one dedicated connection.
       await sql.withLock("test-reset", async tx => {
         await tx.query("SET FOREIGN_KEY_CHECKS=0");

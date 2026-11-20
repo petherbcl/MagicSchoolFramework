@@ -18,7 +18,7 @@ function fixture({ location = OVERLAND, spawnReady = true, enterGame, throwOn = 
   let now = 1000000;
   const character = { characterId: "1", userId: "1", firstName: "Ana", lastName: "Silva", house: "Ravenclaw", version: 1, lastPlayedAt: null,
     state: { inventory: [], look: null, location } };
-  const repository = { list: async () => [character], get: async () => character, touch: async () => {}, save: async () => character,
+  const repository = { ensureHouseRole: async () => ["ravenclaw"], list: async () => [character], get: async () => character, touch: async () => {}, save: async () => character,
     audit: async () => {}, };
   const sessions = new Map([[1, { sessionId: "s1", userId: "1", ready: true }]]);
   const events = [], sent = [], applied = [], released = [], entered = [], order = [];
@@ -87,7 +87,7 @@ test("ms:spawnCancelled falls back to the default destination", async () => {
 test("a synchronous ms:spawnCancelled from the emit itself is not lost", async () => {
   const g = fixture(), seen = [];
   let lobby;
-  lobby = createLobby({ repository: { list: async () => [g.character], get: async () => g.character, touch: async () => {}, save: async () => g.character, audit: async () => {} }, config,
+  lobby = createLobby({ repository: { ensureHouseRole: async () => [], list: async () => [g.character], get: async () => g.character, touch: async () => {}, save: async () => g.character, audit: async () => {} }, config,
     game: { enterLobby(p, l) { l.previous = {}; }, async settleLobby() { return true; }, release() {}, cancel() {}, send() {}, kick() {}, async apply(p, c, ok, t, d) { seen.push(["apply", d]); }, capture: (p, prev) => prev },
     core: { Users: { get: () => ({ sessionId: "s1" }), isReady: () => true }, Players: { async enterGame() {} } }, spawn: { isReady: () => true }, clock: () => 1e9,
     emit: (name, payload) => { if (name === "ms:spawnSelectionRequested") lobby.spawnCancelled({ playerId: payload.playerId, sessionId: payload.sessionId, reason: "NO_OPTIONS" }); },
@@ -161,7 +161,7 @@ test("the session leaving ready during choosingSpawn makes a later answer fail c
 });
 test("an apply failure after the spawn answer detaches the player (no half-applied state)", async () => {
   const f = fixture(); await f.open();
-  const failing = createLobby({ repository: { list: async () => [f.character], get: async () => f.character, touch: async () => {}, save: async () => f.character, audit: async () => {} }, config,
+  const failing = createLobby({ repository: { ensureHouseRole: async () => [], list: async () => [f.character], get: async () => f.character, touch: async () => {}, save: async () => f.character, audit: async () => {} }, config,
     game: { enterLobby(p, l) { l.previous = {}; }, async settleLobby() { return true; }, release() {}, cancel() {}, send() {}, kick(p, reason) { f.order.push("kick:" + reason); }, async apply() { throw new Error("native"); }, capture: (p, prev) => prev },
     core: { Users: { get: () => ({ sessionId: "s1" }), isReady: () => true }, Players: { async enterGame() { f.order.push("enterGame"); } } }, spawn: { isReady: () => true }, clock: () => 1e9,
     emit: () => {}, logger: { error() {} } });

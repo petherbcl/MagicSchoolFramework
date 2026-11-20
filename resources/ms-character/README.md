@@ -57,6 +57,16 @@ O recurso cria a tabela `ms_characters` (índices `ms_characters_user` e `ms_cha
 
 Funciona em **PostgreSQL, MySQL e MariaDB**, conforme o `MS_SQL_URL` do ms-sql (`sql.dialect`). O DDL é uma lista de statements por motor: [schema.postgres.js](server/database/schema.postgres.js) (sem `CREATE SCHEMA`) e [schema.mysql.js](server/database/schema.mysql.js) (MySQL 8.0.19+ e MariaDB 10.6+). No MySQL/MariaDB o "schema" é a base de dados `MS_SQL_SCHEMA`, criada pelo ms-sql; o índice parcial `ms_characters_user_active` passa a um índice simples `(user_id, deleted_at)` e a coluna `state` (JSON) não tem `DEFAULT`, porque o valor é sempre passado no INSERT. O `createTables()` corre sob `sql.withLock("ms-character:schema", ...)` e falha com `MS_CORE_SCHEMA_MISSING` se o schema do ms-core não existir. Os cortes das 24 h do limite de criações e da retenção calculam-se em JS (`Date`), e uma transação escolhida como vítima de deadlock é repetida (até 2 vezes).
 
+### Role da casa (`ms_character_roles`)
+
+Cada personagem recebe o role da casa que escolheu, gravado na tabela `ms_character_roles` do ms-core (colunas `character_id` e `role`; o ms-character não a cria, só confirma no arranque que existe). Os roles são `gryffindor`, `hufflepuff`, `ravenclaw`, `slytherin` e `unaffiliated`.
+
+- **Na criação:** o role é gravado na mesma transação que a personagem (se a criação falhar, não fica role).
+- **Ao escolher a personagem:** se faltar o role da casa (personagens criadas antes desta versão), é acrescentado de forma idempotente. Os roles ficam em memória com a personagem (`Characters.getSelected(playerId).roles`, só os guardados; o `player` implícito é do ms-core).
+- **No jogo:** o ms-core lê esta tabela em `Players.enterGame` e relê-a a cada ciclo, por isso `Core.Players.get(playerId).roles` inclui o role da casa (por exemplo `["ravenclaw", "player"]`).
+- **Purga:** como a tabela não tem chave estrangeira (pertence ao ms-core), a purga de personagens apagadas remove primeiro os seus roles.
+- **Casa fixa:** a casa não muda depois da criação; o role acompanha-a.
+
 ### Recuperar uma personagem apagada
 
 Apagar uma personagem é um soft delete: a linha fica com `deleted_at` preenchido, deixa de aparecer no lobby, deixa de contar para o limite `MS_MAX_CHARACTERS` e fica registada em `magic_school_rp.ms_audit_log` (`character.deleted`). Fica recuperável durante `MS_DELETED_RETENTION_DAYS` dias; depois é eliminada de vez.
