@@ -1,9 +1,9 @@
 "use strict";
 
-const { SpawnError, check, clone, locationId, position } = require("./validation");
+const { SpawnError, check, clone, locationId, position, roles: rolesOf } = require("./validation");
 const { RESERVED_ID } = require("./config");
 
-const VERSION = "0.3.2";
+const VERSION = "0.4.0";
 const CANCEL_REASONS = Object.freeze(["NOT_READY", "NO_OPTIONS", "INTERNAL_ERROR", "STOPPED", "CLIENT_TIMEOUT", "CLIENT_ABORTED"]);
 // Per-player ingress token bucket shared by every client event (SEC-01): a burst of 10, refilled at 10 per second.
 const BUCKET_SIZE = 10, BUCKET_REFILL_PER_MS = 10 / 1000;
@@ -81,10 +81,13 @@ function createSpawn({ config, game, core, emit = () => {}, logger = console, cl
 
   // The offered list of one player: "last" first (only when ms-character handed one over), then the configuration.
   // `destination` is server-side only; the client receives the id, the name and the derived camera pose.
-  function offer(last) {
+  // CHG-04: a configured location is offered only when it has no role or its role is among the character's roles (case-sensitive).
+  // `last` is never restricted. A restricted location is simply absent: its id, name and camera pose are never exposed.
+  function offer(last, roles) {
     const entries = [];
     if (last) entries.push({ id: RESERVED_ID, name: "Última localização", kind: "last", destination: last });
     for (const location of config.locations) {
+      if (location.role && !roles.has(location.role)) continue;
       entries.push({ id: location.id, name: location.name, kind: "config", destination: { x: location.x, y: location.y, z: location.z, yaw: location.yaw } });
     }
     return entries;
@@ -102,11 +105,12 @@ function createSpawn({ config, game, core, emit = () => {}, logger = console, cl
       // A request for a session that is not the live one is stale: nobody is waiting for an answer.
       if (core.Users.get(playerId)?.sessionId !== sessionId || !core.Users.isReady(playerId)) return false;
       const previous = selections.get(playerId);
-      const offered = offer(position(payload.last));
-      if (offered.length === 0) { if (previous) close(previous, { tell: false }); cancel(playerId, sessionId, "NO_OPTIONS"); return false; }
+      const roles = rolesOf(payload.roles); // CHG-04: snapshot for this selection; a replaced request carries its own
+      const offered = offer(position(payload.last), roles);
+      if (offered.length === 0) { if (previous) close(previous); cancel(playerId, sessionId, "NO_OPTIONS"); return false; }
       // A replaced selection hands its hold over (never leaves the player unheld between the two).
       if (previous) close(previous, { tell: false, keepHold: true });
-      s = { playerId, sessionId, characterId: String(payload.characterId ?? ""), status: "opening", offered: new Map(offered.map(item => [item.id, item])),
+      s = { playerId, sessionId, characterId: String(payload.characterId ?? ""), roles, status: "opening", offered: new Map(offered.map(item => [item.id, item])),
         selectedId: null, arrived: false, selectedAt: 0, lastActionAt: 0,
         tokens: BUCKET_SIZE, tokensAt: clock(), noticeAt: new Map(), requestedAt: clock(), opened: false,
         // CHG-01 movement: move = { id, token, status: "pending" | "done" | "failed" } of the latest select.

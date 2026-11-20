@@ -454,11 +454,11 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
     assert.deepEqual(setLook, [characterId]); assert.equal(lookCalls, 0);
     assert.equal(g.kicks.length, 0);
   });
-  test("version 0.6.0 matches package.json, api.version and the README", async t => {
+  test("version 0.6.1 matches package.json, api.version and the README", async t => {
     const f = await fixture(t);
     const fs = require("node:fs"), path = require("node:path");
     const pkg = require("../package.json"), readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
-    assert.equal(f.lobby.api.version, "0.6.0"); assert.equal(pkg.version, "0.6.0"); assert.match(readme, /versão 0.6.0/);
+    assert.equal(f.lobby.api.version, "0.6.1"); assert.equal(pkg.version, "0.6.1"); assert.match(readme, /versão 0.6.1/);
   });
 
   test("creations are capped per account in 24 h, deleted characters included (M-01)", async t => {

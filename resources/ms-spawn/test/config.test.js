@@ -32,7 +32,8 @@ test("the .env.example defaults are valid with 6 unique locations, copied exactl
   const config = loadConfig({}, { envFile: file });
   assert.deepEqual(config.locations.map(item => item.name), ["Sala Comum Slytherin", "Sala Comum Hufflepuff", "Sala Comum Gryffindor", "Sala Comum Ravenclaw", "Pátio de Hogwarts", "Hogsmeade"]);
   assert.equal(new Set(config.locations.map(item => item.id)).size, 6);
-  assert.deepEqual({ ...config.locations[0] }, { id: "sala-comum-slytherin", name: "Sala Comum Slytherin", x: 359573, y: -451727.25, z: -85308.25, yaw: -146.48 });
+  assert.deepEqual({ ...config.locations[0] }, { id: "sala-comum-slytherin", name: "Sala Comum Slytherin", role: "slytherin", x: 359573, y: -451727.25, z: -85308.25, yaw: -146.48 });
+  assert.deepEqual(config.locations.map(item => item.role), ["slytherin", "hufflepuff", "gryffindor", "ravenclaw", undefined, undefined]);
   assert.deepEqual({ ...config.locations[5] }, { id: "hogsmeade", name: "Hogsmeade", x: 395037.5, y: -519061, z: -82090.25, yaw: 112.24 });
   assert.equal(config.camera.durationMs, 1500);
 });
@@ -116,4 +117,29 @@ test("CHG-03: preview snap defaults to false and timing log to true; both parse 
       assert.throws(() => load([], { [key]: bad }), { name: "SpawnConfigError", code: "BOOLEAN_CONFIG_INVALID" }, key + "=" + bad);
     }
   }
+});
+
+// CHG-04 (STORY-01.06): optional role per location.
+const roleEntry = (name, role) => ({ name, x: 1, y: 2, z: 3, yaw: 4, ...(role === undefined ? {} : { role }) });
+test("01.06: a valid role is stored without changing id, name or coordinates", () => {
+  const [a] = load([roleEntry("Sala Comum Gryffindor", "gryffindor")]).locations;
+  assert.deepEqual({ ...a }, { id: "sala-comum-gryffindor", name: "Sala Comum Gryffindor", x: 1, y: 2, z: 3, yaw: 4, role: "gryffindor" });
+  assert.ok(Object.isFrozen(a));
+  for (const role of ["a", "x".repeat(32), "my_role-2"]) assert.equal(load([roleEntry("L", role)]).locations[0].role, role);
+});
+test("01.06: a missing or empty role means open to everyone", () => {
+  for (const role of [undefined, ""]) assert.equal("role" in load([roleEntry("L", role)]).locations[0], false);
+});
+test("01.06: a malformed role fails closed with a stable code", () => {
+  for (const role of ["Gryffindor", "x".repeat(33), "a b", "a.b", "é", " gryffindor", 5, null, true, ["a"], {}]) {
+    assert.throws(() => load([roleEntry("L", role)]), { name: "SpawnConfigError", code: "LOCATION_ROLE_INVALID" }, JSON.stringify(role));
+  }
+});
+test("01.06: the role is not part of the slug or the uniqueness checks", () => {
+  assert.throws(() => load([roleEntry("Hogsmeade", "gryffindor"), roleEntry("Hogsmeade")]), { code: "LOCATION_NAME_DUPLICATE" });
+  assert.throws(() => load([roleEntry("Sala A", "x"), roleEntry("sala-a", "y")]), { code: "LOCATION_ID_COLLISION" });
+  assert.equal(load([roleEntry("A", "same"), roleEntry("B", "same")]).locations.length, 2);
+});
+test("01.06: a well formed role that no character has is accepted", () => {
+  assert.equal(load([roleEntry("L", "nobody-has-this")]).locations[0].role, "nobody-has-this");
 });

@@ -1,6 +1,6 @@
 "use strict";
 
-// ms-character 0.6.0: delegation of the final position to ms-spawn (events), with a fake repository, game and core.
+// ms-character 0.6.1: delegation of the final position to ms-spawn (events), with a fake repository, game and core.
 // No database. The default path (ms-spawn absent or not ready) is covered by the existing lobby/game tests.
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -14,11 +14,11 @@ const { loadConfig } = require("../server/config");
 const config = loadConfig({}, { envFile: null });
 const OVERLAND = { areaId: "Overland", x: 10, y: 20, z: 30, yaw: 40 };
 
-function fixture({ location = OVERLAND, spawnReady = true, enterGame, throwOn = null, nativePlayer: native = null } = {}) {
+function fixture({ roles = ["ravenclaw"], location = OVERLAND, spawnReady = true, enterGame, throwOn = null, nativePlayer: native = null } = {}) {
   let now = 1000000;
   const character = { characterId: "1", userId: "1", firstName: "Ana", lastName: "Silva", house: "Ravenclaw", version: 1, lastPlayedAt: null,
     state: { inventory: [], look: null, location } };
-  const repository = { ensureHouseRole: async () => ["ravenclaw"], list: async () => [character], get: async () => character, touch: async () => {}, save: async () => character,
+  const repository = { ensureHouseRole: async () => roles, list: async () => [character], get: async () => character, touch: async () => {}, save: async () => character,
     audit: async () => {}, };
   const sessions = new Map([[1, { sessionId: "s1", userId: "1", ready: true }]]);
   const events = [], sent = [], applied = [], released = [], entered = [], order = [];
@@ -51,7 +51,7 @@ const DEST = { x: 1, y: 2, z: 3, yaw: 4 };
 test("with ms-spawn ready the lobby holds in choosingSpawn and applies the destination from ms:spawnSelected", async () => {
   const f = fixture(); await f.open();
   const selecting = f.lobby.select(1, "1"); await tick();
-  assert.deepEqual(f.requested().map(e => e.payload), [{ playerId: 1, sessionId: "s1", userId: "1", characterId: "1", last: { x: 10, y: 20, z: 30, yaw: 40 } }]);
+  assert.deepEqual(f.requested().map(e => e.payload), [{ playerId: 1, sessionId: "s1", userId: "1", characterId: "1", last: { x: 10, y: 20, z: 30, yaw: 40 }, roles: ["ravenclaw"] }]);
   assert.equal(f.sent.at(-1), "choosingSpawn");
   assert.deepEqual([f.applied.length, f.released.length, f.entered.length], [0, 0, 0]);
   assert.equal(f.lobby.spawnSelected({ playerId: 1, sessionId: "s1", destination: { ...DEST, extra: 1 } }), true);
@@ -172,10 +172,10 @@ test("an apply failure after the spawn answer detaches the player (no half-appli
   assert.deepEqual(f.order, ["kick:Não foi possível carregar a personagem."]);
   assert.equal(failing.api.isPlaying(1), false);
 });
-test("api.version is 0.6.0 everywhere", () => {
+test("api.version is 0.6.1 everywhere", () => {
   const root = path.join(__dirname, "..");
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version, "0.6.0");
-  assert.match(fs.readFileSync(path.join(root, "README.md"), "utf8"), /versão 0\.6\.0/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version, "0.6.1");
+  assert.match(fs.readFileSync(path.join(root, "README.md"), "utf8"), /versão 0\.6\.1/);
   assert.match(fs.readFileSync(path.join(root, "README.md"), "utf8"), /choosingSpawn/);
 });
 
@@ -336,4 +336,29 @@ test("SEC-07: the watchSpawn fallback (ms-spawn lost) ends with the orphaned pre
   f.flags.ready = false; f.advance(6000);
   f.lobby.watchSpawn(); await tick(); await tick(); f.game.complete(1, "teleport", 42, 0); await selecting;
   assert.deepEqual([...holders], []); assert.equal(f.lobby.api.isPlaying(1), true);
+});
+
+// CHG-04 (STORY-03.05): roles in ms:spawnSelectionRequested.
+async function rolesOfRequest(roles) {
+  const f = fixture({ roles }); await f.open();
+  const selecting = f.lobby.select(1, "1"); await tick();
+  const payload = f.requested()[0].payload;
+  f.lobby.spawnCancelled({ playerId: 1, sessionId: "s1", reason: "NO_OPTIONS" }); await selecting;
+  return payload.roles;
+}
+test("03.05: the request carries the character's roles (house role included) as a copy", async () => {
+  const f = fixture(); await f.open();
+  const selecting = f.lobby.select(1, "1"); await tick();
+  const { roles } = f.requested()[0].payload;
+  assert.deepEqual(roles, ["ravenclaw"]);
+  roles.push("tampered"); assert.deepEqual(f.character.roles, ["ravenclaw"], "the emitted array is not the stored one");
+  f.lobby.spawnCancelled({ playerId: 1, sessionId: "s1", reason: "NO_OPTIONS" }); await selecting;
+});
+test("03.05: roles is always an array, bounded to 32 entries of 1..32 characters", async () => {
+  assert.deepEqual(await rolesOfRequest([]), []);
+  assert.deepEqual(await rolesOfRequest(null), []);
+  assert.deepEqual(await rolesOfRequest("gryffindor"), []);
+  assert.deepEqual(await rolesOfRequest(["a", "", "x".repeat(33), 7, "b"]), ["a", "b"]);
+  const many = Array.from({ length: 40 }, (_, i) => "r" + i);
+  assert.deepEqual(await rolesOfRequest(many), many.slice(0, 32));
 });

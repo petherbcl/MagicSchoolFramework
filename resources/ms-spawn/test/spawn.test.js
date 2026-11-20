@@ -33,7 +33,7 @@ function fixture(t, { locations = LOCATIONS, settings = {} } = {}) {
   const spawn = createSpawn({ config: { ...config, ...settings }, game, core, notices: { TELEPORT_FAILED: "falha" }, clock: () => now, emit: (name, payload) => events.push({ name, payload }), logger: { error() {} } });
   spawn.start();
   const join = (id = 1, sessionId = "s" + id) => sessions.set(id, { sessionId, userId: "1", ready: true });
-  const req = (id = 1, last = null) => spawn.request({ playerId: id, sessionId: "s" + id, userId: "1", characterId: "7", last });
+  const req = (id = 1, last = null, extra = {}) => spawn.request({ playerId: id, sessionId: "s" + id, userId: "1", characterId: "7", last, ...extra });
   const names = () => events.map(e => e.name);
   const lastState = id => states.filter(s => s.id === id).at(-1)?.payload;
   const advance = ms => { now += ms; };
@@ -232,7 +232,7 @@ test("a new request replaces the previous selection of the same player silently"
 test("the Spawn export is frozen, ready after start, and lists id/name only", async t => {
   const f = fixture(t);
   assert.equal(Object.isFrozen(f.spawn.api), true);
-  assert.equal(f.spawn.api.isReady(), true); assert.equal(f.spawn.api.version, "0.3.2");
+  assert.equal(f.spawn.api.isReady(), true); assert.equal(f.spawn.api.version, "0.4.0");
   const list = f.spawn.api.locations();
   assert.deepEqual(list, [{ id: "hogsmeade", name: "Hogsmeade" }, { id: "patio-de-hogwarts", name: "Pátio de Hogwarts" }]);
   assert.ok(Object.isFrozen(list) && Object.isFrozen(list[0]));
@@ -367,4 +367,72 @@ test("02.11: no spawn point and no extra field leak through the open payload; on
   assert.equal(payload.locations.length, 3);
   const f2 = fixture(t, { locations: [] }); f2.join(); f2.req(1, LAST);
   assert.deepEqual(f2.opened[0].payload.locations.map(l => l.id), ["last"]);
+});
+
+// CHG-04 (STORY-02.13, 02.14): role filtering of the offered list.
+const ROLED = [
+  { name: "Hogsmeade", x: 1000, y: 2000, z: 300, yaw: 90 },
+  { name: "Sala Gryffindor", x: 5, y: 6, z: 7, yaw: 8, role: "gryffindor" },
+  { name: "Sala Slytherin", x: 15, y: 16, z: 17, yaw: 18, role: "slytherin" },
+];
+const offeredIds = f => f.opened.at(-1).payload.locations.map(l => l.id);
+test("02.13: only locations without a role or with a role the character has are offered; last is never restricted", async t => {
+  const f = fixture(t, { locations: ROLED }); f.join(1); f.join(2); f.join(3); f.join(4);
+  f.req(1, null, { roles: ["gryffindor"] }); assert.deepEqual(offeredIds(f), ["hogsmeade", "sala-gryffindor"]);
+  f.req(2, null, { roles: ["gryffindor", "slytherin", "other"] }); assert.deepEqual(offeredIds(f), ["hogsmeade", "sala-gryffindor", "sala-slytherin"]);
+  f.req(3, LAST, { roles: [] }); assert.deepEqual(offeredIds(f), ["last", "hogsmeade"]);
+  f.req(4, null, { roles: ["Gryffindor"] }); assert.deepEqual(offeredIds(f), ["hogsmeade"], "case-sensitive");
+});
+test("02.13: restricted ids, names and poses never reach the client, and the role field is never sent", async t => {
+  const f = fixture(t, { locations: ROLED }); f.join(); f.req(1, null, { roles: ["gryffindor"] });
+  const text = JSON.stringify(f.opened.at(-1).payload) + JSON.stringify(f.states);
+  assert.ok(!/slytherin/i.test(text)); assert.ok(!/"role/.test(text));
+  for (const l of f.opened.at(-1).payload.locations) assert.deepEqual(Object.keys(l).sort(), ["camera", "id", "kind", "name"]);
+});
+test("02.13: a request without roles or with malformed or over-bound roles counts as no roles", async t => {
+  const f = fixture(t, { locations: ROLED }); for (let i = 1; i <= 6; i++) f.join(i);
+  f.req(1); assert.deepEqual(offeredIds(f), ["hogsmeade"]);
+  f.req(2, null, { roles: "gryffindor" }); assert.deepEqual(offeredIds(f), ["hogsmeade"]);
+  f.req(3, null, { roles: ["gryffindor", 5] }); assert.deepEqual(offeredIds(f), ["hogsmeade"]);
+  f.req(4, null, { roles: ["gryffindor", "x".repeat(33)] }); assert.deepEqual(offeredIds(f), ["hogsmeade"]);
+  f.req(5, null, { roles: [...Array(32).fill("pad"), "gryffindor"] }); assert.deepEqual(offeredIds(f), ["hogsmeade"], "33 entries");
+  f.req(6, null, { roles: [...Array(31).fill("pad"), "gryffindor"] }); assert.deepEqual(offeredIds(f), ["hogsmeade", "sala-gryffindor"], "32 entries are within the bound");
+});
+test("02.13: Spawn.locations() lists every configured location with id and name only", async t => {
+  const f = fixture(t, { locations: ROLED });
+  assert.deepEqual(f.spawn.api.locations().map(l => ({ ...l })), [{ id: "hogsmeade", name: "Hogsmeade" }, { id: "sala-gryffindor", name: "Sala Gryffindor" }, { id: "sala-slytherin", name: "Sala Slytherin" }]);
+});
+test("02.14: a restricted id sent by the client is rejected like an unknown id, with no teleport and no event", async t => {
+  const f = fixture(t, { locations: ROLED }); f.join(); f.req(1, null, { roles: ["gryffindor"] });
+  reject(() => f.spawn.select(1, { id: "sala-slytherin" }), "INVALID_LOCATION", f);
+  reject(() => f.spawn.confirm(1, { id: "sala-slytherin" }), "INVALID_LOCATION", f);
+  await f.settle(); assert.deepEqual(f.native.teleports, []); assert.ok(!f.names().includes("ms:spawnSelected"));
+  f.advance(500); await ready(f, "sala-gryffindor"); f.spawn.confirm(1, { id: "sala-gryffindor" });
+  assert.deepEqual(f.events.at(-1).payload.destination, { x: 5, y: 6, z: 7, yaw: 8 });
+});
+test("02.14: nothing left to offer cancels with NO_OPTIONS and opens nothing; last alone is enough to open", async t => {
+  const f = fixture(t, { locations: ROLED.slice(1) }); f.join(1); f.join(2);
+  assert.equal(f.req(1, null, { roles: [] }), false);
+  assert.deepEqual(f.events.at(-1), { name: "ms:spawnCancelled", payload: { playerId: 1, sessionId: "s1", reason: "NO_OPTIONS" } }); assert.equal(f.opened.length, 0);
+  assert.equal(f.req(2, LAST, { roles: [] }), true); assert.deepEqual(offeredIds(f), ["last"]);
+});
+test("02.14: a replaced request carries its own roles and the snapshot ignores later changes to the input array", async t => {
+  const f = fixture(t, { locations: ROLED }); f.join();
+  const roles = ["gryffindor"]; f.req(1, null, { roles }); roles.push("slytherin");
+  reject(() => f.spawn.select(1, { id: "sala-slytherin" }), "INVALID_LOCATION", f);
+  f.req(1, null, { roles: ["slytherin"] }); assert.deepEqual(offeredIds(f), ["hogsmeade", "sala-slytherin"]);
+  reject(() => f.spawn.select(1, { id: "sala-gryffindor" }), "INVALID_LOCATION", f);
+  f.advance(500); f.spawn.select(1, { id: "sala-slytherin" });
+});
+test("02.14: a replacing request that leaves nothing closes the old selection and cancels", async t => {
+  const f = fixture(t, { locations: ROLED.slice(1) }); f.join(); f.req(1, null, { roles: ["gryffindor"] });
+  assert.equal(f.req(1, null, { roles: [] }), false);
+  assert.equal(f.events.at(-1).payload.reason, "NO_OPTIONS"); assert.throws(() => f.spawn.select(1, { id: "sala-gryffindor" }), { code: "SESSION_EXPIRED" });
+});
+test("SEC-15: a replacing request that ends in NO_OPTIONS tells the old page it is closed", async t => {
+  const f = fixture(t, { locations: ROLED.slice(1) }); f.join(); f.req(1, null, { roles: ["gryffindor"] });
+  assert.equal(f.lastState(1).status, "choosing");
+  assert.equal(f.req(1, null, { roles: [] }), false);
+  assert.deepEqual(f.lastState(1), { status: "closed" });
+  assert.equal(f.events.at(-1).payload.reason, "NO_OPTIONS");
 });

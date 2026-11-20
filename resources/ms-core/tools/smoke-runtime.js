@@ -58,9 +58,9 @@ async function main() {
     if(!sql || sql.dialect!=="postgres" || !sql.isReady()) throw new Error("Invalid ms-sql export");
     if(core.version!=="0.7.0" || core.Users.isReady(12345)!==false || await core.Users.hasPermission(12345,"admin")!==false) throw new Error("Invalid core export");
     const characters=Exports.get("ms-character","Characters");
-    if(!characters || characters.version!=="0.6.0" || characters.isPlaying(12345)!==false || characters.getSelected(12345)!==null) throw new Error("Invalid character export");
+    if(!characters || characters.version!=="0.6.1" || characters.isPlaying(12345)!==false || characters.getSelected(12345)!==null) throw new Error("Invalid character export");
     const spawn=Exports.get("ms-spawn","Spawn");
-    if(!spawn || spawn.version!=="0.3.2" || spawn.isReady()!==true || spawn.locations().length!==6 || spawn.locations().some(l=>"x" in l)) throw new Error("Invalid spawn export");
+    if(!spawn || spawn.version!=="0.4.0" || spawn.isReady()!==true || spawn.locations().length!==6 || spawn.locations().some(l=>"x" in l)) throw new Error("Invalid spawn export");
     console.log("MS_CORE_POSTGRES_PROBE_OK"); });`);
   const engine = await PGlite.create(), server = new PGLiteSocketServer({ db: engine, host: "127.0.0.1", port: 0, maxConnections: 8 });
   let child, admin, adminSql;

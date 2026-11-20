@@ -1,6 +1,6 @@
 {
   "name": "ms-spawn",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "description": "MagicSchoolRP spawn selection: the player flies the camera over configured locations and confirms where to appear",
   "engines": {

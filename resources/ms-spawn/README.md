@@ -1,6 +1,6 @@
 # ms-spawn
 
-Escolha do local de aparição do MagicSchoolRP (versão 0.3.2). Depois de o jogador escolher uma personagem no [ms-character](../ms-character/README.md), este recurso deixa-o sobrevoar os locais configurados com a câmara e confirmar onde aparece. Só depois da confirmação o ms-character liberta o jogador no mundo 0.
+Escolha do local de aparição do MagicSchoolRP (versão 0.4.0). Depois de o jogador escolher uma personagem no [ms-character](../ms-character/README.md), este recurso deixa-o sobrevoar os locais configurados com a câmara e confirmar onde aparece. Só depois da confirmação o ms-character liberta o jogador no mundo 0.
 
 - **Sem base de dados.** Não usa o ms-sql, não importa `pg`/`mysql2` e não tem variáveis de base de dados. A última posição vem do ms-character (`ms_characters`).
 - **O servidor manda.** O cliente só envia o `id` do local. As coordenadas vêm sempre da configuração (ou da última posição guardada) e nunca de um payload do cliente.
@@ -48,7 +48,7 @@ Apresentação só do cliente (`client/main.js`); o servidor continua a decidir 
 
 | Evento | Origem | Payload |
 | :--- | :--- | :--- |
-| `ms:spawnSelectionRequested` | ms-character | `{ playerId, sessionId, userId, characterId, last: {x,y,z,yaw} \| null }` |
+| `ms:spawnSelectionRequested` | ms-character | `{ playerId, sessionId, userId, characterId, last: {x,y,z,yaw} \| null, roles: string[] }` (`roles` desde a 0.4.0/ms-character 0.6.1, CHG-04: papéis da personagem, no máximo 32 de `[a-z0-9_-]{1,32}`; ausente, não-array, acima do limite ou com uma entrada malformada = sem papéis, só se oferecem locais sem `role`) |
 | `ms:spawnSelected` | ms-spawn | `{ playerId, sessionId, destination: {x,y,z,yaw} }` |
 | `ms:spawnCancelled` | ms-spawn | `{ playerId, sessionId, reason }` com `reason` em `NOT_READY`, `NO_OPTIONS`, `INTERNAL_ERROR`, `STOPPED`, `CLIENT_TIMEOUT`, `CLIENT_ABORTED`. O ms-character segue com o destino por omissão. Fim de sessão e desconexão não emitem nada |
 
@@ -70,7 +70,7 @@ Variáveis de processo sobrepõem o ficheiro. Uma configuração inválida imped
 
 | Variável | Por omissão | Limites | Descrição |
 | :--- | :--- | :--- | :--- |
-| `MS_SPAWN_LOCATIONS` | 6 locais do `.env.example` | 0 a 12 entradas | JSON `[{ "name", "x", "y", "z", "yaw" }]`. `name` 1 a 40 caracteres, sem caracteres de controlo; `x,y,z` em cm (até 1e7), `yaw` em graus (±360). O `id` é o slug do nome (`Pátio de Hogwarts` dá `patio-de-hogwarts`); nomes com o mesmo slug, slug vazio e o id reservado `last` são rejeitados. Zero entradas é válido |
+| `MS_SPAWN_LOCATIONS` | 6 locais do `.env.example` | 0 a 12 entradas | JSON `[{ "name", "x", "y", "z", "yaw", "role"? }]`. `role` (opcional, CHG-04, 0.4.0): `[a-z0-9_-]`, 1 a 32 caracteres; ausente ou `""` = aberto a todos; com valor, o local só é oferecido a personagens que tenham esse papel (comparação exata, maiúsculas/minúsculas contam; inclui o papel da casa, p. ex. `gryffindor`). Um valor malformado recusa o arranque; um papel que nenhuma personagem tem é aceite e nunca coincide (o ms-spawn não consulta o ms-core). O `role` não entra no `id` nem na unicidade, nunca vai para o cliente nem para `Spawn.locations()`; um id restrito enviado por um cliente é rejeitado como `INVALID_LOCATION`; se o filtro não deixar nenhum local nem `last`, a seleção cancela com `NO_OPTIONS`. Os papéis são o instantâneo do pedido (mudanças durante a escolha só valem na seleção seguinte). `name` 1 a 40 caracteres, sem caracteres de controlo; `x,y,z` em cm (até 1e7), `yaw` em graus (±360). O `id` é o slug do nome (`Pátio de Hogwarts` dá `patio-de-hogwarts`); nomes com o mesmo slug, slug vazio e o id reservado `last` são rejeitados. Zero entradas é válido |
 | `MS_SPAWN_CAMERA_DURATION_MS` | 1500 | 300 a 10000 | Duração do voo |
 | `MS_SPAWN_CAMERA_EASING` | `easeInOut` | `linear`, `smoothStep`, `easeIn`, `easeOut`, `easeInOut` | Curva do voo |
 | `MS_SPAWN_CAMERA_DISTANCE` | 1200 | 100 a 20000 | cm atrás do ponto de aparição |

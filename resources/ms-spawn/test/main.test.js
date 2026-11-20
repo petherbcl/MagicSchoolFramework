@@ -61,7 +61,7 @@ test("resourceStart registers the Spawn export and isReady turns true; resourceS
   const h = harness(); t.after(h.restore);
   h.start();
   const api = h.exportsRegistered["ms-spawn:Spawn"];
-  assert.equal(api.isReady(), true); assert.equal(api.version, "0.3.2");
+  assert.equal(api.isReady(), true); assert.equal(api.version, "0.4.0");
   assert.deepEqual(plain(api.locations()), [{ id: "hogsmeade", name: "Hogsmeade" }, { id: "patio", name: "Pátio" }]);
   assert.ok(h.logs.some(line => line.includes("ms-spawn ready")));
   h.stop(); assert.equal(api.isReady(), false);

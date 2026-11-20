@@ -25,6 +25,9 @@ function createLobby({ repository, config, game, core, spawn = { isReady: () => 
     const yaw = at.yaw === undefined ? 0 : at.yaw;
     return [at.x, at.y, at.z, yaw].every(Number.isFinite) ? { x: at.x, y: at.y, z: at.z, yaw } : null;
   };
+  // CHG-04: the character's roles for ms-spawn: always a fresh array, at most 32 entries of 1..32 characters (non-strings, empty and
+  // longer entries are dropped, never cut, so a cut role can never match another one).
+  const spawnRoles = value => (Array.isArray(value) ? value : []).filter(item => typeof item === "string" && item.length >= 1 && item.length <= 32).slice(0, 32);
   const destinationOf = value => {
     const at = value?.destination;
     return at && [at.x, at.y, at.z].every(n => Number.isFinite(n) && Math.abs(n) <= COORDINATE_BOUND) && Number.isFinite(at.yaw) && Math.abs(at.yaw) <= 360 ? { x: at.x, y: at.y, z: at.z, yaw: at.yaw } : null;
@@ -138,7 +141,7 @@ function createLobby({ repository, config, game, core, spawn = { isReady: () => 
         l.spawnAskedAt = clock();
         l.status = "choosingSpawn"; send(l);
         // The wait exists before the event goes out: a synchronous ms:spawnCancelled must find it.
-        event("ms:spawnSelectionRequested", { playerId: l.playerId, sessionId: l.sessionId, userId: l.userId, characterId: character.characterId, last: lastPosition(character) });
+        event("ms:spawnSelectionRequested", { playerId: l.playerId, sessionId: l.sessionId, userId: l.userId, characterId: character.characterId, last: lastPosition(character), roles: spawnRoles(character.roles) });
         destination = await answer; ensure(l);
         l.status = "applying"; send(l);
       }
@@ -196,7 +199,7 @@ function createLobby({ repository, config, game, core, spawn = { isReady: () => 
     return true;
   }
   const api = Object.freeze({
-    version: "0.6.0",
+    version: "0.6.1",
     isPlaying: id => { const l = lobbies.get(id); return Boolean(l && valid(l) && l.status === "playing"); },
     getSelected: id => { const l = lobbies.get(id); return l && valid(l) && l.status === "playing" ? clone(l.character) : null; },
     list: async id => { const l = lobbyOf(id); return (await repository.list(l.userId)).map(summary); },

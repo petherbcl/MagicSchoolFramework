@@ -23,4 +23,14 @@ function position(value) {
   return finite ? { x, y, z, yaw } : null;
 }
 
-module.exports = { SpawnError, check, clone, locationId, position, ID_PATTERN };
+// CHG-04: roles of the character, handed over by ms-character. At most 32 entries of 1..32 characters of [a-z0-9_-]; anything
+// else (not an array, an over-bound array, a malformed entry) counts as no roles, so only unrestricted locations are offered.
+const ROLES_MAX = 32, ROLE_PATTERN = /^[a-z0-9_-]{1,32}$/;
+function roles(value) {
+  if (!Array.isArray(value) || value.length > ROLES_MAX) return new Set();
+  const out = new Set();
+  for (const item of value) { if (typeof item !== "string" || !ROLE_PATTERN.test(item)) return new Set(); out.add(item); }
+  return out;
+}
+
+module.exports = { SpawnError, check, clone, locationId, position, roles, ID_PATTERN };

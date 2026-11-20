@@ -14,7 +14,9 @@ const MAX_LOCATIONS = 12;
 const NAME_MAX = 40;
 const RESERVED_ID = "last";
 const COORDINATE_BOUND = 1e7; // centimetres; the Overland map is far smaller
-const ENTRY_KEYS = Object.freeze(["name", "x", "y", "z", "yaw"]);
+const ENTRY_KEYS = Object.freeze(["name", "x", "y", "z", "yaw", "role"]);
+// CHG-04: optional role per location, same character class as ms-core role names; empty or missing = open to everyone.
+const ROLE_PATTERN = /^[a-z0-9_-]{1,32}$/;
 const CONTROL_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u; // control and format characters (bidi overrides, zero width) and line/paragraph separators
 const EASINGS = Object.freeze(["linear", "smoothStep", "easeIn", "easeOut", "easeInOut"]);
 const LOCATIONS_MAX_CHARS = 16384;
@@ -70,8 +72,10 @@ function parseLocations(raw) {
     if (names.has(name.toLowerCase())) fail("LOCATION_NAME_DUPLICATE", where);
     if (ids.has(id)) fail("LOCATION_ID_COLLISION", where);
     if (![entry.x, entry.y, entry.z].every(value => finiteWithin(value, COORDINATE_BOUND)) || !finiteWithin(entry.yaw, 360)) fail("LOCATION_NUMBER_INVALID", where);
+    // The role never takes part in the id or in the uniqueness checks. Wrong type or characters fail closed; an unknown role is fine (never matches).
+    if (entry.role !== undefined && (typeof entry.role !== "string" || (entry.role !== "" && !ROLE_PATTERN.test(entry.role)))) fail("LOCATION_ROLE_INVALID", where);
     names.add(name.toLowerCase()); ids.add(id);
-    locations.push(Object.freeze({ id, name, x: entry.x, y: entry.y, z: entry.z, yaw: entry.yaw }));
+    locations.push(Object.freeze({ id, name, x: entry.x, y: entry.y, z: entry.z, yaw: entry.yaw, ...(entry.role ? { role: entry.role } : {}) }));
   });
   return locations;
 }
