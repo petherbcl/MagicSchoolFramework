@@ -3,7 +3,7 @@
 const { SpawnError, check, clone, locationId, position } = require("./validation");
 const { RESERVED_ID } = require("./config");
 
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 const CANCEL_REASONS = Object.freeze(["NOT_READY", "NO_OPTIONS", "INTERNAL_ERROR", "STOPPED", "CLIENT_TIMEOUT", "CLIENT_ABORTED"]);
 // Per-player ingress token bucket shared by every client event (SEC-01): a burst of 10, refilled at 10 per second.
 const BUCKET_SIZE = 10, BUCKET_REFILL_PER_MS = 10 / 1000;
@@ -128,6 +128,7 @@ function createSpawn({ config, game, core, emit = () => {}, logger = console, cl
         locations: offered.map(({ id, name, kind, destination }) => ({ id, name, kind, camera: { ...cameraPose(destination, config.camera), departure: departurePose(destination, config.camera) } })),
         flight: { durationMs: config.camera.durationMs, easing: config.camera.easing },
         areaTimeoutMs: config.areaTimeoutMs,
+        timingLog: config.timingLog === true, // CHG-03: only tells the client script to console.log its timing line
       });
       if (!valid(s)) { close(s, { tell: false }); return false; }
       s.status = "choosing"; send(s);
@@ -167,13 +168,22 @@ function createSpawn({ config, game, core, emit = () => {}, logger = console, cl
     s.moves += 1;
     if (s.queued) { timers.clearTimeout(s.queued); s.queued = null; }
     const point = s.offered.get(id).destination;
-    const launch = () => { s.lastMoveAt = clock(); move(s, token, point).catch(() => logger.error("[ms-spawn] move failed unexpectedly")); };
+    const launch = () => { s.lastMoveAt = clock(); move(s, token, point, id).catch(() => logger.error("[ms-spawn] move failed unexpectedly")); };
     const wait = s.lastMoveAt + config.moveGapMs - clock();
     if (wait <= 0) { launch(); return; }
     s.queued = timers.setTimeout(() => { s.queued = null; if (valid(s) && s.move !== null && s.move.token === token) launch(); }, wait);
     if (typeof s.queued?.unref === "function") s.queued.unref();
   }
-  async function move(s, token, point) {
+  // CHG-03: one English line per teleport result that really arrived (a native status 0..5 or the adapter timeout). No coordinates,
+  // no account data: the player's native id and the configured location id only. Superseded/dropped requests resolve without status and are not logged.
+  function logTiming(s, id, ms, outcome) {
+    if (config.timingLog !== true || !outcome) return;
+    const status = outcome.result === "timeout" ? "timeout" : Number.isInteger(outcome.status) ? outcome.status : null;
+    if (status === null) return;
+    if (typeof logger.log !== "function") return;
+    try { logger.log(`[ms-spawn] timing player=${s.playerId} select=${id} teleportMs=${Math.max(0, Math.round(ms))} status=${status} snap=${config.previewSnapToGround === true}`); } catch { /* logging never affects the move */ }
+  }
+  async function move(s, token, point, id) {
     const current = () => valid(s) && s.move !== null && s.move.token === token;
     let outcome;
     try {
@@ -186,7 +196,9 @@ function createSpawn({ config, game, core, emit = () => {}, logger = console, cl
       if (s.unheldSince === null) s.unheldSince = clock(); // bounded by the watchdog (tick): see maxUnheldMs
       if (s.inFlight) game.cancelTeleport(s.playerId);
       s.inFlight = true;
-      outcome = await game.teleport(s.playerId, point);
+      const startedAt = clock();
+      outcome = await game.teleport(s.playerId, point, { snapToGround: config.previewSnapToGround === true });
+      logTiming(s, id, clock() - startedAt, outcome);
     } catch (error) {
       outcome = { result: "failed", status: null, error: true };
     }

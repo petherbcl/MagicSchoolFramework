@@ -33,6 +33,15 @@ function number(env, key, fallback, min, max) {
   if (!Number.isFinite(value) || value < min || value > max) fail("CAMERA_CONFIG_INVALID", key);
   return value;
 }
+// Strict boolean: "true"/"false" (any case) or "1"/"0"; empty or unset = fallback; anything else fails closed (CHG-03).
+function flag(env, key, fallback) {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = raw.trim().toLowerCase();
+  if (value === "true" || value === "1") return true;
+  if (value === "false" || value === "0") return false;
+  return fail("BOOLEAN_CONFIG_INVALID", key);
+}
 // "Sala Comum Slytherin" -> "sala-comum-slytherin": lowercase, accents removed (NFD), non [a-z0-9] runs become "-".
 function slugify(name) {
   return name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -84,6 +93,11 @@ function loadConfig(env = process.env, options = {}) {
       departureHeight: number(env, "MS_SPAWN_CAMERA_DEPARTURE_HEIGHT", 1500, 0, 20000),
       departureDistance: number(env, "MS_SPAWN_CAMERA_DEPARTURE_DISTANCE", 3000, 0, 20000),
     }),
+    // CHG-03: the preview teleport of every select asks the game for snapToGround only when true (the invisible held player only
+    // streams the world; the game holds a snapping player until the floor loads, up to 20 s). ms-character's own teleport is unaffected.
+    previewSnapToGround: flag(env, "MS_SPAWN_PREVIEW_SNAP_TO_GROUND", false),
+    // CHG-03: one server log line per select teleport result and a client console line per select (calibration of the loading).
+    timingLog: flag(env, "MS_SPAWN_TIMING_LOG", true),
     areaTimeoutMs: number(env, "MS_SPAWN_AREA_TIMEOUT_MS", 15000, 1000, 60000),
     // Liveness of the client page (SEC-03): a selection whose page never reports it opened is cancelled after this long,
     // and ms-character falls back to its default spawn. It is about a dead or absent client, never about an idle player.

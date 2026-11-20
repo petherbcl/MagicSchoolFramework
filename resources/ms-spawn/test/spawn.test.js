@@ -232,7 +232,7 @@ test("a new request replaces the previous selection of the same player silently"
 test("the Spawn export is frozen, ready after start, and lists id/name only", async t => {
   const f = fixture(t);
   assert.equal(Object.isFrozen(f.spawn.api), true);
-  assert.equal(f.spawn.api.isReady(), true); assert.equal(f.spawn.api.version, "0.3.1");
+  assert.equal(f.spawn.api.isReady(), true); assert.equal(f.spawn.api.version, "0.3.2");
   const list = f.spawn.api.locations();
   assert.deepEqual(list, [{ id: "hogsmeade", name: "Hogsmeade" }, { id: "patio-de-hogwarts", name: "Pátio de Hogwarts" }]);
   assert.ok(Object.isFrozen(list) && Object.isFrozen(list[0]));
@@ -355,7 +355,7 @@ test("02.11: departurePose is cameraPose with the extra height and distance, det
 test("02.11: no spawn point and no extra field leak through the open payload; only offered locations carry poses", async t => {
   const f = fixture(t); f.join(); f.req(1, LAST);
   const payload = f.opened[0].payload;
-  assert.deepEqual(Object.keys(payload).sort(), ["areaTimeoutMs", "flight", "locations"]);
+  assert.deepEqual(Object.keys(payload).sort(), ["areaTimeoutMs", "flight", "locations", "timingLog"]);
   const text = JSON.stringify(payload);
   for (const point of [LAST, ...LOCATIONS]) {
     for (const l of payload.locations) for (const pose of [l.camera.position, l.camera.departure.position]) assert.notDeepEqual(pose, { x: point.x, y: point.y, z: point.z });

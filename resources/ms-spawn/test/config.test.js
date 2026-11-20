@@ -103,3 +103,17 @@ test("SEC-03: MS_SPAWN_OPEN_ACK_TIMEOUT_MS defaults to 30000 and is bounded 5000
   assert.equal(load([], { MS_SPAWN_OPEN_ACK_TIMEOUT_MS: "60000" }).openAckTimeoutMs, 60000);
   for (const value of ["4999", "600001", "NaN", "-1"]) assert.throws(() => load([], { MS_SPAWN_OPEN_ACK_TIMEOUT_MS: value }), code("CAMERA_CONFIG_INVALID"));
 });
+
+test("CHG-03: preview snap defaults to false and timing log to true; both parse strict booleans and fail closed", () => {
+  const base = load([]);
+  assert.equal(base.previewSnapToGround, false); assert.equal(base.timingLog, true);
+  for (const [raw, expected] of [["true", true], ["TRUE", true], ["1", true], ["false", false], ["False", false], ["0", false], ["", null], ["  ", null]]) {
+    const config = load([], { MS_SPAWN_PREVIEW_SNAP_TO_GROUND: raw, MS_SPAWN_TIMING_LOG: raw });
+    assert.equal(config.previewSnapToGround, expected ?? false, raw); assert.equal(config.timingLog, expected ?? true, raw);
+  }
+  for (const key of ["MS_SPAWN_PREVIEW_SNAP_TO_GROUND", "MS_SPAWN_TIMING_LOG"]) {
+    for (const bad of ["yes", "on", "2", "maybe", "truee"]) {
+      assert.throws(() => load([], { [key]: bad }), { name: "SpawnConfigError", code: "BOOLEAN_CONFIG_INVALID" }, key + "=" + bad);
+    }
+  }
+});

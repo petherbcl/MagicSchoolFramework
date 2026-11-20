@@ -67,9 +67,10 @@ function createGameAdapter({ getPlayer, setTimeout: later = setTimeout, clearTim
       const player = alive(playerId);
       if (player) player.release(PREVIEW_OWNER);
     },
-    // Resolves { result: "ok" | "replaced" | "failed" | "timeout", status? } from playerTeleportComplete (0 ok, 1 replaced by
+    // CHG-03: snapToGround is requested only when asked (config MS_SPAWN_PREVIEW_SNAP_TO_GROUND, preview moves only); otherwise the
+    // option is absent. Resolves { result: "ok" | "replaced" | "failed" | "timeout", status? } from playerTeleportComplete (0 ok, 1 replaced by
     // a newer teleport, 2..5 failed). Rejects only if the player is gone. A call while another is pending supersedes it.
-    teleport(playerId, point) {
+    teleport(playerId, point, { snapToGround = false } = {}) {
       const player = alive(playerId);
       if (!player) return Promise.reject(new Error("PLAYER_GONE"));
       drop(playerId);
@@ -77,7 +78,7 @@ function createGameAdapter({ getPlayer, setTimeout: later = setTimeout, clearTim
         const entry = { requestId: null, resolve, timer: later(() => { abandon(playerId, pending.get(playerId)); settle(playerId, { result: "timeout" }); }, teleportTimeoutMs) };
         pending.set(playerId, entry);
         try {
-          const requestId = player.teleport(point.x, point.y, point.z, { yaw: point.yaw || 0, snapToGround: true });
+          const requestId = player.teleport(point.x, point.y, point.z, { yaw: point.yaw || 0, ...(snapToGround === true ? { snapToGround: true } : {}) });
           if (!Number.isInteger(requestId) || requestId <= 0) settle(playerId, { result: "failed", status: null });
           else entry.requestId = requestId;
         } catch { settle(playerId, { result: "failed", status: null }); }

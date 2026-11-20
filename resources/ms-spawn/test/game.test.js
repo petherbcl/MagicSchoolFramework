@@ -19,10 +19,11 @@ function harness({ location = { areaId: "Overland", x: 5, y: 6, z: 7 }, holdOk =
 }
 const POINT = { x: 10, y: 20, z: 30, yaw: 45 };
 
-test("teleport resolves ok on status 0 with the right requestId and uses snapToGround and the point yaw", async () => {
+test("teleport resolves ok on status 0 with the right requestId and the point yaw, without snapToGround by default (CHG-03)", async () => {
   const h = harness();
   const pending = h.game.teleport(1, POINT);
-  assert.deepEqual(h.calls[0], ["teleport", 10, 20, 30, { yaw: 45, snapToGround: true }]);
+  assert.deepEqual(h.calls[0], ["teleport", 10, 20, 30, { yaw: 45 }]);
+  assert.equal("snapToGround" in h.calls[0][4], false);
   assert.equal(h.game.complete(1, 100, 0), true);
   assert.deepEqual(await pending, { result: "ok", status: 0 });
   assert.equal(h.timers.size, 0, "the timeout timer is cleared");
@@ -114,4 +115,16 @@ test("SEC-10: a teleport that lands after it was cancelled, superseded or timed 
   const second = game.teleport(1, POINT); game.teleport(1, POINT); await second; // superseded (status 1 later is silent)
   assert.equal(game.complete(1, 101, 1), false); assert.equal(errors.length, 1);
   const third = game.teleport(1, POINT); assert.equal(game.complete(1, 103, 0), true); assert.equal((await third).result, "ok");
+});
+
+test("CHG-03: snapToGround is requested only when the option is true", async () => {
+  const h = harness();
+  h.game.teleport(1, POINT, { snapToGround: true });
+  assert.deepEqual(h.calls[0], ["teleport", 10, 20, 30, { yaw: 45, snapToGround: true }]);
+  h.game.teleport(1, POINT, { snapToGround: false });
+  assert.deepEqual(h.calls[1][4], { yaw: 45 });
+  h.game.teleport(1, POINT, {});
+  assert.deepEqual(h.calls[2][4], { yaw: 45 });
+  h.game.teleport(1, POINT, { snapToGround: "yes" });
+  assert.deepEqual(h.calls[3][4], { yaw: 45 }, "only a real true enables it");
 });

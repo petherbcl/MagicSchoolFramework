@@ -31,6 +31,7 @@ const DEFAULT_AREA_TIMEOUT_MS = 15000;
 let view = null, pageReady = false;
 let locations = new Map();          // id -> { position, rotation, departure } from ms-spawn:open
 let pageLocations = null;           // what the page gets: {id, name, kind} only
+let timingLog = false;              // CHG-03: from ms-spawn:open (boolean, absent = false); the page never receives it
 let flightConfig = { durationMs: 1500, easing: "easeInOut" }, areaTimeoutMs = DEFAULT_AREA_TIMEOUT_MS;
 let lastState = null, lastCamera = null, coverState = null;
 // phase: idle | covering | flying | arrived | failed | confirming | finishing | leaving
@@ -133,6 +134,22 @@ function areaLoaded(position) {
   return Boolean(hit) && hit.startPenetrating !== true;
 }
 
+// CHG-03: one console line per select when the cover lifts or the ceiling hits. Measurement only: nothing here gates anything.
+// The last three fields are experimental (semantics of World.isReady/generation and LevelObjects.near are unverified, see
+// docs/ms-spawn-runtime-findings.md) and are read inside attempt(), so a throw costs the field, never the selection.
+const NEAR_RADIUS_CM = 2000;
+function logTiming(f, ceiling) {
+  if (!timingLog || f.timingLogged || typeof console === "undefined" || !console.log) return;
+  f.timingLogged = true;
+  const since = at => (at === null || at === undefined ? "null" : String(at - f.startedAt));
+  const experimental = [
+    "worldReady=" + attempt("World.isReady", () => World.isReady()),
+    "worldGeneration=" + attempt("World.generation", () => World.generation()),
+    "nearObjects=" + attempt("LevelObjects.near", () => LevelObjects.near({ radius: NEAR_RADIUS_CM }).length),
+  ];
+  console.log(`[ms-spawn] timing select=${f.id} toTeleportDoneMs=${since(f.teleportDoneAt)} toGroundHitMs=${since(f.groundHitAt)} toCoverLiftMs=${Date.now() - f.startedAt} ceiling=${ceiling} experimental: ${experimental.join(" ")}`);
+}
+
 // ---- Selection: cover, departure pose, area wait, swoop ------------------------------------------------------------------
 
 // Every select (also a re-select of the same id after a failure) restarts here; the cover stays on without toggling and
@@ -141,7 +158,7 @@ function beginSelection(id) {
   const target = locations.get(id);
   if (!target) return;
   pollTimer = cancelTimer(pollTimer);
-  const f = sel = { id, token: ++counter, startedAt: Date.now(), teleport: null, seenPlaying: false, arrived: false };
+  const f = sel = { id, token: ++counter, startedAt: Date.now(), teleport: null, teleportDoneAt: null, groundHitAt: null, timingLogged: false, seenPlaying: false, arrived: false };
   phase = "covering";
   setCover(true, "choosing");
   // Under the cover: park the camera at the server's departure pose, without animation.
@@ -168,17 +185,18 @@ function pollCover(f) {
   const target = locations.get(f.id);
   if (f.teleport === "failed") { failPrepare(f, FAILED_PREPARE_NOTICE); return; }
   const loaded = f.teleport === "done" && target ? attempt("areaLoaded", () => areaLoaded(target.position)) === true : false;
-  if (loaded) { lift(f); return; }
+  if (loaded) { f.groundHitAt = Date.now(); lift(f, false); return; }
   if (Date.now() - f.startedAt >= areaTimeoutMs) {
     // Decision 1: the ceiling with the teleport done is not a failure (the probe may simply not detect). Without the teleport result it is.
-    if (f.teleport === "done") lift(f); else failPrepare(f, FAILED_PREPARE_NOTICE);
+    if (f.teleport === "done") lift(f, true); else { logTiming(f, true); failPrepare(f, FAILED_PREPARE_NOTICE); }
     return;
   }
   pollTimer = setTimeout(() => pollCover(f), AREA_POLL_MS);
 }
 // Lift the cover and play the swoop from the departure pose to the target pose.
-function lift(f) {
+function lift(f, ceiling = false) {
   const target = locations.get(f.id);
+  logTiming(f, ceiling);
   phase = "flying";
   setCover(false, "choosing");
   const ok = attempt("swoop", () => {
@@ -350,6 +368,7 @@ Events.on("ms-spawn:open", guarded("open", value => {
     durationMs: flightInput && finite(flightInput.durationMs) ? Math.max(300, Math.min(10000, flightInput.durationMs)) : 1500,
     easing: flightInput && EASINGS.includes(flightInput.easing) ? flightInput.easing : "easeInOut",
   };
+  timingLog = payload.timingLog === true; // CHG-03: absent (older server) = off
   areaTimeoutMs = finite(payload.areaTimeoutMs) ? Math.max(1000, Math.min(60000, payload.areaTimeoutMs)) : DEFAULT_AREA_TIMEOUT_MS;
   lastState = null; lastCamera = null; coverState = null; lastSelectAt = -Infinity; phase = "idle"; serverStatus = null;
   bodyTries = 0; hideBody(); // once per open: a no-op when the body is already hidden
@@ -395,7 +414,7 @@ Events.on("ms-spawn:state", guarded("state", value => {
   } else if (phase === "covering" && sel && sel.id === selectedId && teleport) {
     // G14: the result of the server's move for the current select (anything for another id is stale and ignored).
     if (teleport === "failed") { failPrepare(sel, notice || FAILED_PREPARE_NOTICE); sendToPage("state", lastState); return; }
-    sel.teleport = "done";
+    sel.teleport = "done"; sel.teleportDoneAt = Date.now();
     pollTimer = cancelTimer(pollTimer);
     sendToPage("state", lastState);
     pollCover(sel);
@@ -404,7 +423,7 @@ Events.on("ms-spawn:state", guarded("state", value => {
     // The server is the authority on the selection: if a click was dropped (rate limit), restart for what the server holds.
     beginSelection(selectedId);
     if (sel && sel.id === selectedId && teleport === "failed") { failPrepare(sel, FAILED_PREPARE_NOTICE); sendToPage("state", lastState); return; }
-    if (sel && sel.id === selectedId && teleport === "done") sel.teleport = "done"; // that move is over: no later signal will come
+    if (sel && sel.id === selectedId && teleport === "done") { sel.teleport = "done"; sel.teleportDoneAt = Date.now(); } // that move is over: no later signal will come
   }
   sendToPage("state", lastState);
   // The page lifts the cover on any notice: re-assert it while the area is still being prepared.

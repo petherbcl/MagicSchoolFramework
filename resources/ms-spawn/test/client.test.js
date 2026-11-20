@@ -20,7 +20,7 @@ const OPEN = { locations: [
 ], flight: { durationMs: 1500, easing: "easeOut" }, areaTimeoutMs: 4000 };
 const target = x => ({ position: { x, y: 2, z: 3 }, rotation: { pitch: -26.57, yaw: x === 20 ? 90 : 0, roll: 0 } });
 
-function harness({ captureNull = false, activateThrows = false, animateThrows = false, activateResult = true, trace = null, visibility = () => true, position = () => ({ x: 7, y: 8, z: 9 }), emitThrows = false } = {}) {
+function harness({ captureNull = false, activateThrows = false, animateThrows = false, activateResult = true, trace = null, visibility = () => true, position = () => ({ x: 7, y: 8, z: 9 }), emitThrows = false, logs = [], world = null, levelObjects = null } = {}) {
   const calls = [], handlers = {}, viewHandlers = {};
   let timers = [], nextTimer = 1, now = 1000;
   const camera = { active: false, playing: false };
@@ -35,7 +35,7 @@ function harness({ captureNull = false, activateThrows = false, animateThrows = 
     restore(transition) { calls.push(["restore", transition]); camera.active = false; },
   };
   const sandbox = {
-    console: { log() {} }, Date: { now: () => now },
+    console: { log: line => logs.push(String(line)) }, Date: { now: () => now },
     setTimeout: (fn, ms) => { const id = nextTimer++; timers.push({ id, fn, at: now + ms }); return id; },
     clearTimeout: id => { timers = timers.filter(timer => timer.id !== id); },
     Events: { on: (name, fn) => { handlers[name] = fn; }, emitServer: (name, payload) => { if (emitThrows && name === "ms-spawn:select") throw new Error("boom"); calls.push(["emitServer", name, payload]); } },
@@ -43,7 +43,8 @@ function harness({ captureNull = false, activateThrows = false, animateThrows = 
       on: (_view, name, fn) => { viewHandlers[name] = fn; }, emit: (_view, name, payload) => calls.push(["emit", name, payload]) },
     Camera,
     LocalPlayer: { setVisibility: visible => { calls.push(["setVisibility", visible]); return typeof visibility === "function" ? visibility(visible) : visibility; }, getPosition: () => position() },
-    ...(trace ? { World: { lineTrace: (start, end, options) => { calls.push(["lineTrace", start, end, options]); return trace(start, end, options); } } } : {}),
+    ...(trace || world ? { World: { ...(trace ? { lineTrace: (start, end, options) => { calls.push(["lineTrace", start, end, options]); return trace(start, end, options); } } : {}), ...(world || {}) } } : {}),
+    ...(levelObjects ? { LevelObjects: levelObjects } : {}),
   };
   vm.runInNewContext(SOURCE, sandbox, { filename: "client/main.js" });
   const advance = ms => {
@@ -59,7 +60,7 @@ function harness({ captureNull = false, activateThrows = false, animateThrows = 
   const covers = () => calls.filter(call => call[0] === "emit" && call[1] === "cover").map(call => call[2]);
   const toPage = name => calls.filter(call => call[0] === "emit" && call[1] === name).map(call => call[2]);
   const server = name => calls.filter(call => call[0] === "emitServer" && call[1] === name).map(call => call[2]);
-  const h = { Camera, calls, advance, named, toPage, covers, server, camera, handlers, viewHandlers, clear: () => { calls.length = 0; },
+  const h = { Camera, calls, logs, advance, named, toPage, covers, server, camera, handlers, viewHandlers, clear: () => { calls.length = 0; },
     open: (payload = OPEN) => { handlers["ms-spawn:open"](payload); viewHandlers.ready(); },
     state: payload => handlers["ms-spawn:state"](payload),
     select: id => viewHandlers.select({ id }),
@@ -523,4 +524,49 @@ test("SEC-14: the same restart with teleport failed ends at once with the prepar
   h.select("patio"); h.advance(300); h.clear();
   h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "failed", notice: "Aguarda antes de repetir." });
   assert.ok(covered(h, false)); assert.equal(h.toPage("notice").length, 1);
+});
+
+// ---- CHG-03: timing line ------------------------------------------------------------------------------------------------
+const timed = (extra = {}) => ({ ...OPEN, timingLog: true, ...extra });
+const timingLines = h => h.logs.filter(line => line.startsWith("[ms-spawn] timing"));
+test("CHG-03: one timing line when the cover lifts on a ground hit, with the experimental fields marked", () => {
+  let hits = 0;
+  const h = harness({ trace: () => (++hits >= 2 ? hit() : null), world: { isReady: () => true, generation: () => 7 }, levelObjects: { near: opts => { assert.deepEqual(plain(opts), { radius: 2000 }); return [1, 2, 3]; } } });
+  h.open(timed()); h.select("hogsmeade");
+  h.advance(100); h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "done" }); h.advance(300);
+  const lines = timingLines(h);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^\[ms-spawn\] timing select=hogsmeade toTeleportDoneMs=100 toGroundHitMs=\d+ toCoverLiftMs=\d+ ceiling=false experimental: worldReady=true worldGeneration=7 nearObjects=3$/);
+  assert.doesNotMatch(lines[0], /position|x=|y=|z=/);
+});
+test("CHG-03: a ceiling with the teleport done logs ceiling=true and toGroundHitMs=null; the page never gets the flag", () => {
+  const h = harness({ trace: () => null });
+  h.open(timed()); h.select("hogsmeade");
+  h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "done" }); h.advance(4300);
+  const lines = timingLines(h);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /toGroundHitMs=null .* ceiling=true/);
+  assert.equal(JSON.stringify(h.toPage("open")).includes("timingLog"), false);
+});
+test("CHG-03: a missing World/LevelObjects only costs the experimental fields, never the lift or the swoop", () => {
+  const h = harness({ trace: hit });
+  h.open(timed()); h.select("hogsmeade");
+  h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "done" }); h.advance(300);
+  assert.equal(h.named("animateTo").length, 1);
+  assert.equal(timingLines(h).length, 1);
+});
+test("CHG-03: no timing line when the flag is false or absent (older server)", () => {
+  for (const open of [timed({ timingLog: false }), OPEN]) {
+    const h = harness({ trace: hit });
+    h.open(open); h.select("hogsmeade");
+    h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "done" }); h.advance(300);
+    assert.equal(timingLines(h).length, 0);
+    assert.equal(h.named("animateTo").length, 1);
+  }
+});
+test("CHG-03: a ceiling without the teleport result also logs once, with toTeleportDoneMs=null", () => {
+  const h = harness({ trace: hit });
+  h.open(timed()); h.select("hogsmeade"); h.advance(4300);
+  const lines = timingLines(h);
+  assert.equal(lines.length, 1); assert.match(lines[0], /toTeleportDoneMs=null toGroundHitMs=null .* ceiling=true/);
 });

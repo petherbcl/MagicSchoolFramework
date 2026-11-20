@@ -24,13 +24,14 @@ function fixture({ locations = LOCATIONS, notices = { TELEPORT_FAILED: "falha" }
   const sessions = new Map(), events = [], states = [];
   const core = { Users: { get: id => sessions.get(id) || null, isReady: id => sessions.get(id)?.ready === true } };
   // Fake native player: hold ownership is modelled so tests can prove the player is never unheld by a takeover.
-  const native = { holders: new Set(["lobby"]), log: [], teleports: [], releases: 0, active: 0, maxActive: 0, auto: true, takeoverOk: true, throwTeleport: false, holdOk: true };
+  const native = { holders: new Set(["lobby"]), log: [], teleports: [], options: [], opens: [], logs: [], releases: 0, active: 0, maxActive: 0, auto: true, takeoverOk: true, throwTeleport: false, holdOk: true };
   const game = {
-    open() {}, state: (id, payload) => states.push({ id, payload }),
+    open(id, payload) { native.opens.push(payload); }, state: (id, payload) => states.push({ id, payload }),
     takeover() { native.log.push("takeover"); if (!native.takeoverOk) return false; native.holders.add("preview"); native.log.push("hold:preview"); native.holders.delete("lobby"); native.log.push("release:lobby"); return true; },
     hold(id, point) { native.log.push("hold:" + (point ? point.x + "," + point.y : "here")); if (!native.holdOk) return false; native.holders.add("preview"); return true; },
     release() { native.log.push("release:preview"); native.releases++; native.holders.delete("preview"); },
-    teleport(id, point) {
+    teleport(id, point, options) {
+      native.options.push(options);
       native.log.push("teleport:" + point.x + "," + point.y);
       if (native.throwTeleport) throw new Error("native");
       const entry = { point, done: false }; native.teleports.push(entry);
@@ -43,7 +44,7 @@ function fixture({ locations = LOCATIONS, notices = { TELEPORT_FAILED: "falha" }
     // The adapter contract: cancelling (or a newer teleport) resolves the pending one as "replaced".
     cancelTeleport() { native.log.push("cancel"); const last = native.teleports.at(-1); if (last && !last.done) last.resolve({ result: "replaced", status: 1 }); },
   };
-  const spawn = createSpawn({ config, game, core, notices, clock: () => now, timers, emit: (name, payload) => events.push({ name, payload }), logger: { error() {} } });
+  const spawn = createSpawn({ config, game, core, notices, clock: () => now, timers, emit: (name, payload) => events.push({ name, payload }), logger: { error() {}, log: line => native.logs.push(line) } });
   spawn.start();
   const join = (id = 1, sessionId = "s" + id) => sessions.set(id, { sessionId, userId: "1", ready: true });
   const req = (id = 1, last = null) => spawn.request({ playerId: id, sessionId: "s" + id, userId: "1", characterId: "7", last });
@@ -439,4 +440,50 @@ test("SEC-12: abandon works before the page acked and is bounded by the ingress 
   for (let i = 0; i < 10; i++) g.spawn.opened(1); // drain the bucket (10 events)
   reject(() => g.spawn.abandon(1), "INGRESS_DROPPED");
   assert.deepEqual(g.events, []); // dropped silently, the selection is untouched
+});
+
+// ---- CHG-03: preview snapToGround option and timing log -------------------------------------------------------------------
+test("CHG-03: the preview teleport asks for snapToGround only when MS_SPAWN_PREVIEW_SNAP_TO_GROUND is on", async () => {
+  const off = await started();
+  off.spawn.select(1, { id: "hogsmeade" }); await off.settle();
+  assert.deepEqual(off.native.options, [{ snapToGround: false }]);
+  const on = await started({ config: { previewSnapToGround: true } });
+  on.spawn.select(1, { id: "hogsmeade" }); await on.settle();
+  assert.deepEqual(on.native.options, [{ snapToGround: true }]);
+});
+test("CHG-03: the hold is re-applied after a no-snap teleport and confirm stays gated as before", async () => {
+  const f = await started();
+  f.spawn.select(1, { id: "hogsmeade" }); await f.settle();
+  assert.equal(f.native.log.at(-1), "hold:1000,2000");
+  assert.deepEqual(f.lastState(1), { status: "choosing", selectedId: "hogsmeade", teleport: "done" });
+});
+test("CHG-03: one timing line per select result, without coordinates or account data", async () => {
+  const f = await started({ config: { previewSnapToGround: true } });
+  f.spawn.select(1, { id: "hogsmeade" }); await f.settle();
+  assert.equal(f.native.logs.length, 1);
+  assert.match(f.native.logs[0], /^\[ms-spawn\] timing player=1 select=hogsmeade teleportMs=\d+ status=0 snap=true$/);
+  assert.doesNotMatch(f.native.logs[0], /1000|2000|300|s1|userId/);
+  f.advance(500); f.spawn.select(1, { id: "patio-de-hogwarts" }); await f.settle();
+  assert.equal(f.native.logs.length, 2);
+  assert.match(f.native.logs[1], /select=patio-de-hogwarts .* snap=true$/);
+});
+test("CHG-03: the timing line carries the failure status and the timeout; synthetic replaced results are not logged", async () => {
+  const f = await started(undefined, { auto: false });
+  f.spawn.select(1, { id: "hogsmeade" }); await f.settle();
+  f.native.teleports[0].resolve({ result: "failed", status: 3 }); await f.settle();
+  assert.match(f.native.logs[0], /status=3 snap=false$/);
+  f.advance(500); f.spawn.select(1, { id: "hogsmeade" }); await f.settle();
+  f.native.teleports[1].resolve({ result: "timeout" }); await f.settle();
+  assert.match(f.native.logs[1], /status=timeout snap=false$/);
+  f.advance(500); f.spawn.select(1, { id: "patio-de-hogwarts" }); await f.settle();
+  f.native.teleports[2].resolve({ result: "replaced" }); await f.settle();
+  assert.equal(f.native.logs.length, 2);
+});
+test("CHG-03: MS_SPAWN_TIMING_LOG off writes no server line and the open payload carries timingLog false", async () => {
+  const f = await started({ config: { timingLog: false } });
+  f.spawn.select(1, { id: "hogsmeade" }); await f.settle();
+  assert.deepEqual(f.native.logs, []);
+  assert.equal(f.native.opens[0].timingLog, false);
+  const on = await started();
+  assert.equal(on.native.opens[0].timingLog, true);
 });

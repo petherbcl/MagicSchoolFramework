@@ -5,7 +5,7 @@ export interface SpawnLocationSummary {
   readonly name: string;
 }
 export interface Spawn {
-  /** "0.3.1" (0.3.0 behaviour plus the client abandon signal): every select also teleports and holds the invisible player at the chosen point (hold owner "ms-spawn:preview"); CHG-02 adds the client cover, the hidden local body and camera.departure. */
+  /** "0.3.2" (0.3.1 plus CHG-03: preview teleport without snapToGround by default, optional timing log, `timingLog` in ms-spawn:open; 0.3.0 behaviour plus the client abandon signal): every select also teleports and holds the invisible player at the chosen point (hold owner "ms-spawn:preview"); CHG-02 adds the client cover, the hidden local body and camera.departure. */
   readonly version: string;
   /** True while ms-spawn is started with a valid configuration. */
   isReady(): boolean;

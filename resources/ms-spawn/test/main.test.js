@@ -61,7 +61,7 @@ test("resourceStart registers the Spawn export and isReady turns true; resourceS
   const h = harness(); t.after(h.restore);
   h.start();
   const api = h.exportsRegistered["ms-spawn:Spawn"];
-  assert.equal(api.isReady(), true); assert.equal(api.version, "0.3.1");
+  assert.equal(api.isReady(), true); assert.equal(api.version, "0.3.2");
   assert.deepEqual(plain(api.locations()), [{ id: "hogsmeade", name: "Hogsmeade" }, { id: "patio", name: "Pátio" }]);
   assert.ok(h.logs.some(line => line.includes("ms-spawn ready")));
   h.stop(); assert.equal(api.isReady(), false);
@@ -179,16 +179,23 @@ test("SEC-01/SEC-03: ms-spawn:opened is routed, a flood of confirms in applying 
 
 const settleTeleport = (h, player, status) => h.handlers.playerTeleportComplete(player, player.requestId, status);
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-test("CHG-01: select takes the hold over, teleports with snapToGround and re-holds after playerTeleportComplete status 0", async t => {
+test("CHG-01: select takes the hold over, teleports without snapToGround (CHG-03 default) and re-holds after playerTeleportComplete status 0", async t => {
   const h = harness(); t.after(h.restore); h.start();
   const player = h.join(1); h.request(1);
   h.clientHandlers["ms-spawn:select"](player, { id: "patio", x: 99 }); await h.flush();
   assert.deepEqual(player.natives.map(entry => entry[0] + (entry[1]?.owner ? ":" + entry[1].owner : typeof entry[1] === "string" ? ":" + entry[1] : "")),
     ["hold:ms-spawn:preview", "release:ms-character:lobby", "release:ms-spawn:preview", "teleport"]);
-  assert.deepEqual(plain(player.natives.at(-1)), ["teleport", 5, 6, 7, { yaw: 8, snapToGround: true }]);
+  assert.deepEqual(plain(player.natives.at(-1)), ["teleport", 5, 6, 7, { yaw: 8 }]);
   settleTeleport(h, player, 0); await h.flush();
   const hold = player.natives.at(-1)[1];
   assert.deepEqual(plain(hold), { owner: "ms-spawn:preview", x: 5, y: 6, z: 7, mode: "clamp", radius: 0, radiusZ: 0, ttlMs: 1800000 });
+});
+test("CHG-03: the real wiring sends timingLog (default on) in ms-spawn:open and teleports without snap", async t => {
+  const h = harness(); t.after(h.restore); h.start();
+  const player = h.join(1); h.request(1);
+  assert.equal(plain(player.emitted.find(([name]) => name === "ms-spawn:open")[1]).timingLog, true);
+  h.clientHandlers["ms-spawn:select"](player, { id: "patio" }); await h.flush();
+  assert.equal("snapToGround" in plain(player.natives.at(-1))[4], false);
 });
 test("CHG-01: playerTeleportComplete for unknown request ids or players is ignored; status 1 and 4 handled by status", async t => {
   const h = harness(); t.after(h.restore); h.start();

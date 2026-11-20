@@ -1,6 +1,6 @@
 # ms-spawn
 
-Escolha do local de aparição do MagicSchoolRP (versão 0.3.1). Depois de o jogador escolher uma personagem no [ms-character](../ms-character/README.md), este recurso deixa-o sobrevoar os locais configurados com a câmara e confirmar onde aparece. Só depois da confirmação o ms-character liberta o jogador no mundo 0.
+Escolha do local de aparição do MagicSchoolRP (versão 0.3.2). Depois de o jogador escolher uma personagem no [ms-character](../ms-character/README.md), este recurso deixa-o sobrevoar os locais configurados com a câmara e confirmar onde aparece. Só depois da confirmação o ms-character liberta o jogador no mundo 0.
 
 - **Sem base de dados.** Não usa o ms-sql, não importa `pg`/`mysql2` e não tem variáveis de base de dados. A última posição vem do ms-character (`ms_characters`).
 - **O servidor manda.** O cliente só envia o `id` do local. As coordenadas vêm sempre da configuração (ou da última posição guardada) e nunca de um payload do cliente.
@@ -56,7 +56,7 @@ Cliente e servidor (JSON; servidor para cliente sempre `JSON.stringify`):
 
 | Sentido | Evento | Payload |
 | :--- | :--- | :--- |
-| S para C | `ms-spawn:open` | `{ locations: [{ id, name, kind: "last"\|"config", camera: { position, rotation: {pitch,yaw,roll}, departure: { position, rotation } } }], flight: { durationMs, easing }, areaTimeoutMs }`. Nunca leva o ponto de aparição |
+| S para C | `ms-spawn:open` | `{ locations: [{ id, name, kind: "last"\|"config", camera: { position, rotation: {pitch,yaw,roll}, departure: { position, rotation } } }], flight: { durationMs, easing }, areaTimeoutMs, timingLog?: boolean }` (`timingLog` desde a 0.3.2, CHG-03: só diz ao script do cliente se escreve a linha de medição na consola; ausente = falso; a página nunca o recebe). Nunca leva o ponto de aparição |
 | S para C | `ms-spawn:state` | `{ status: "choosing"\|"applying"\|"closed", selectedId?, teleport?: "done"\|"failed", notice? }`. Desde a 0.3.1 (SEC-14) um aviso repete o `teleport` do movimento já terminado do local retido, para o cliente que recomeça nesse id não esperar por um sinal que não volta; o cliente que não recebe resposta a um `confirm` em 5 s repõe a página em `choosing` com aviso (SEC-11) |
 | C para S | `ms-spawn:select` / `ms-spawn:arrived` / `ms-spawn:confirm` | `{ id }` (qualquer outro campo é ignorado). Limites por jogador: balde de 10 eventos com reposição de 10/s (o excesso é descartado em silêncio) e um aviso por código a cada 2 s. O servidor ignora um `arrived` anterior à duração mínima do voo (`MS_SPAWN_CAMERA_DURATION_MS` menos 250 ms); o cliente não envia `arrived` quando o voo falha |
 | C para S | `ms-spawn:opened` | `{}`; enviado quando a página está pronta, a cada `ms-spawn:open` |
@@ -78,6 +78,8 @@ Variáveis de processo sobrepõem o ficheiro. Uma configuração inválida imped
 | `MS_SPAWN_CAMERA_DEPARTURE_HEIGHT` | 1500 | 0 a 20000 | cm a mais de altura da pose de partida do swoop, somados a `MS_SPAWN_CAMERA_HEIGHT` |
 | `MS_SPAWN_CAMERA_DEPARTURE_DISTANCE` | 3000 | 0 a 20000 | cm a mais de distância da pose de partida, somados a `MS_SPAWN_CAMERA_DISTANCE` |
 | `MS_SPAWN_AREA_TIMEOUT_MS` | 15000 | 1000 a 60000 | Teto de espera do carregamento da zona (o cliente sai antes se o `World.lineTrace` acertar; teto com o teleport concluído não é falha) e atraso a partir do qual o servidor aceita o `confirm` sem relatório de chegada |
+| `MS_SPAWN_PREVIEW_SNAP_TO_GROUND` | `false` | `true`/`false`/`1`/`0` | CHG-03 (0.3.2): se o teleport de pré-visualização de cada `select` pede `snapToGround` ao jogo. Desligado, o jogador invisível retido só serve para o mundo carregar à volta e não espera pelo chão (o jogo segura um jogador com snap até o chão carregar, até 20 s). Só afeta a pré-visualização: o teleport do ms-character na confirmação não muda. Valor inválido recusa o arranque |
+| `MS_SPAWN_TIMING_LOG` | `true` | `true`/`false`/`1`/`0` | CHG-03 (0.3.2): medição para calibrar o carregamento. O servidor escreve uma linha por `select` quando chega o resultado do teleport (`[ms-spawn] timing player=<id> select=<local> teleportMs=<ms> status=<0..5 ou timeout> snap=<bool>`) e o cliente escreve uma linha na consola quando a cobertura levanta ou o teto é atingido (`toTeleportDoneMs`, `toGroundHitMs`, `toCoverLiftMs`, `ceiling` e campos experimentais). Sem coordenadas nem dados de conta. Pode desligar-se com `false` depois de calibrar |
 | `MS_SPAWN_OPEN_ACK_TIMEOUT_MS` | 30000 | 5000 a 600000 | Vigilância do cliente: se a página nunca confirmar (`ms-spawn:opened`) que abriu, a seleção é cancelada com `CLIENT_TIMEOUT` e o ms-character usa o spawn por omissão. Não limita um jogador parado na UI: o relógio pára na primeira confirmação |
 
 Como obter coordenadas: no jogo, `/pos` no sítio e com a orientação pretendidos (o `yaw` é o "w"). Se um ponto é um spawn seguro ainda não foi verificado em jogo.

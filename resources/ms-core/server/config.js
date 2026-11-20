@@ -60,7 +60,7 @@ function loadConfig(env = process.env, options = {}) {
     // R-02: native handshake semaphore (concurrent jobs, waiting queue, per-job timeout).
     admission: Object.freeze({ concurrency: 3, maxQueue: 256, taskTimeoutMs: 15000 }),
     quarantineWorldBase: 3000000000,
-    spawn: { position: { x: 366784, y: -461527, z: -82610 }, yaw: -130 },
+    spawn: { position: { x: 385396, y: -480395.75, z: -77138.5 }, yaw: -126.9 },
     rolePermissions: { player: ["users.metadata.self"],
       moderator: ["users.read", "allowlist.manage", "bans.manage"], admin: ["*"] },
   });
