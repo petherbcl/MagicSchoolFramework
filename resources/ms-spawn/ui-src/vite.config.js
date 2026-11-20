@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { createReadStream, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // The CEF page is served from fw://resources/ms-spawn/client/ui/. Module scripts with
 // `crossorigin` over a custom scheme are a CORS risk, so the bundle is a classic IIFE loaded
@@ -19,9 +21,27 @@ function classicScripts() {
   };
 }
 
+// dev:ui only: serves the placeholder images of src/dev/icons/ as /icons/dev-*.svg so the mocked locations can show them.
+// `apply: "serve"` means nothing of it, and none of those files, reaches the build (client/ui/icons/ comes from public/icons/).
+const DEV_ICONS = fileURLToPath(new URL("./src/dev/icons/", import.meta.url));
+function devIcons() {
+  return {
+    name: "ms-dev-icons",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use("/icons", (req, res, next) => {
+        const name = decodeURIComponent((req.url ?? "").split("?")[0].slice(1));
+        if (!/^dev-[a-z0-9_-]+\.svg$/.test(name) || !existsSync(DEV_ICONS + name)) return next();
+        res.setHeader("Content-Type", "image/svg+xml");
+        createReadStream(DEV_ICONS + name).pipe(res);
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "./",
-  plugins: [react(), tailwindcss(), classicScripts()],
+  plugins: [react(), tailwindcss(), classicScripts(), devIcons()],
   build: {
     outDir: "../client/ui",
     emptyOutDir: true,

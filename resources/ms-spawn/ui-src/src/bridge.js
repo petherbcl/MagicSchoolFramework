@@ -11,8 +11,11 @@ import { useCallback, useEffect, useReducer } from "react";
 //   "confirm"  { id }          → ms-spawn:confirm { id }. Answer: state "applying", or state "choosing" + notice (rejected).
 //
 // client → page
-//   "open"     { locations: [{ id, name, kind: "last" | "config", camera: { position: {x,y,z}, rotation: {pitch,yaw,roll} } }] }
+//   "open"     { locations: [{ id, name, kind: "last" | "config", icon?: string, camera: { position: {x,y,z}, rotation: {pitch,yaw,roll} } }] }
 //              ← ms-spawn:open. Resets the screen. `camera` is for the client only; the page ignores it.
+//              `icon` (CHG-05) is a file NAME only (^[a-z0-9_-]+\.(png|webp|jpg|jpeg|svg)$, at most 64 characters); the page loads
+//              `icons/<name>` (same origin) and validates the name again. Never present for "last" (ignored if it is). A
+//              missing, invalid or failing image falls back to the pin (console.warn once per file name, nothing for the player).
 //   "state"    { status: "choosing" | "applying" | "closed", selectedId?: string, notice?: string }
 //              ← ms-spawn:state. `notice` is pt-PT text for the alert zone. "choosing" + notice = server rejection (D11):
 //              the selection and the camera stay. "closed" after "applying" = success (the client hides the page);
@@ -48,7 +51,7 @@ function parseLocations(value) {
   if (!Array.isArray(value)) return [];
   const seen = new Set();
   const items = value.filter(item => item && typeof item.id === "string" && item.id && typeof item.name === "string" && !seen.has(item.id) && seen.add(item.id))
-    .map(item => ({ id: item.id, name: item.name, kind: item.kind === "last" ? "last" : "config" }));
+    .map(item => ({ id: item.id, name: item.name, kind: item.kind === "last" ? "last" : "config", ...(item.kind !== "last" && typeof item.icon === "string" ? { icon: item.icon } : {}) }));
   const last = items.find(item => item.kind === "last");
   return [...(last ? [last] : []), ...items.filter(item => item !== last && item.kind !== "last")];
 }
@@ -141,10 +144,12 @@ const FAIL_NOTICE = "Não foi possível preparar este local. Tenta de novo ou es
 const REJECT_NOTICE = "O servidor rejeitou este local. Escolhe outro local e tenta de novo.";
 const LOST_NOTICE = "Perdeste a ligação à sessão. Volta a entrar no servidor para continuares.";
 const camera = { position: { x: 0, y: 0, z: 0 }, rotation: { pitch: 0, yaw: 0, roll: 0 } };
-const BASE = [["hogsmeade", "Hogsmeade"], ["hogwarts-gates", "Portões de Hogwarts"], ["feldcroft", "Feldcroft"]];
+// [id, name, icon]: dev-only placeholder images served by vite.config.js (src/dev/icons/); not shipped, not game data.
+const BASE = [["hogsmeade", "Hogsmeade", "dev-hogsmeade.svg"], ["hogwarts-gates", "Portões de Hogwarts", "dev-gates.svg"], ["feldcroft", "Feldcroft", "dev-feldcroft.svg"]];
 const MORE = ["Lago de Hogwarts", "Floresta Proibida", "Cais de Hogsmeade", "Torre de Astronomia", "Pátio das Estufas",
   "Cabana do Guarda-Caça", "Ponte de Madeira", "Vale de Poidh", "Ruínas do Norte"];
-export const mockFlags = { last: true, many: false, slow: false, fail: false, reject: false, empty: false };
+// `icons` off = no `icon` at all (pin everywhere); `missing` = every `icon` names a file that does not exist (fallback to the pin).
+export const mockFlags = { last: true, many: false, slow: false, fail: false, reject: false, empty: false, icons: true, missing: false };
 let timer = 0;
 let arrivedId = null;
 let selectedId = null;
@@ -153,8 +158,15 @@ const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { deta
 
 function mockLocations() {
   if (mockFlags.empty) return [];
-  const list = [...BASE, ...(mockFlags.many ? MORE.map((name, index) => [`extra-${index}`, name]) : [])].map(([id, name]) => ({ id, name, kind: "config", camera }));
-  return mockFlags.last ? [{ id: "last", name: "Última localização", kind: "last", camera }, ...list] : list;
+  // Extras: the first has a missing file, the second an invalid name (never becomes a URL), the rest alternate image / no icon.
+  const extraIcon = index => (index === 0 ? "dev-missing.png" : index === 1 ? "../x.png" : index % 2 ? undefined : BASE[index % 3][2]);
+  const all = [...BASE, ...(mockFlags.many ? MORE.map((name, index) => [`extra-${index}`, name, extraIcon(index)]) : [])];
+  const list = all.map(([id, name, icon]) => {
+    const shown = !mockFlags.icons ? undefined : mockFlags.missing && icon ? `dev-missing-${id}.png` : icon;
+    return { id, name, kind: "config", ...(shown ? { icon: shown } : {}), camera };
+  });
+  // "last" never carries an image; the mock sends a stray `icon` on purpose so the page proves it ignores it.
+  return mockFlags.last ? [{ id: "last", name: "Última localização", kind: "last", icon: "dev-hogsmeade.svg", camera }, ...list] : list;
 }
 export function mockOpen() {
   clearTimeout(timer);

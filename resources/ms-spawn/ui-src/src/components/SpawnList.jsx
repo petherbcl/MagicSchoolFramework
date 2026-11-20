@@ -12,7 +12,7 @@ export default function SpawnList({ locations, selectedId, flyingId, locked, onS
       {ordered.flatMap(item => {
         const row = (
           <li key={item.id}>
-            <SpawnItem name={item.name} kind={item.kind} selected={selectedId === item.id} flying={flyingId === item.id}
+            <SpawnItem name={item.name} kind={item.kind} icon={item.icon} selected={selectedId === item.id} flying={flyingId === item.id}
               disabled={locked} onSelect={() => onSelect(item.id)} />
           </li>
         );

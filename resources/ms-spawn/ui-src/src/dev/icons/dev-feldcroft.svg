@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><!-- PLACEHOLDER spawn icon: green hills and a tower. Replace with a real 128x128 image. -->
+<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7FB5C9"/><stop offset="1" stop-color="#DCE8D0"/></linearGradient></defs>
+<rect width="128" height="128" fill="url(#s)"/>
+<path d="M0 96c24-24 48-24 64-8 20-20 44-18 64 2v38H0z" fill="#5E8F52"/>
+<path d="M0 112c30-14 60-10 128 0v16H0z" fill="#3F6A3A"/>
+<path d="M78 90V50h12v-8l6-6 6 6v8h6v40z" fill="#7A6F63"/>
+<rect x="94" y="62" width="6" height="10" fill="#2B3F63"/>
+</svg>

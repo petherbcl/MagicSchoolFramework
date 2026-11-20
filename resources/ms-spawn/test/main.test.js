@@ -10,7 +10,7 @@ const vm = require("node:vm");
 
 const plain = value => JSON.parse(JSON.stringify(value));
 const SOURCE = fs.readFileSync(path.join(__dirname, "..", "server", "main.js"), "utf8");
-const LOCATIONS = JSON.stringify([{ name: "Hogsmeade", x: 1, y: 2, z: 3, yaw: 4 }, { name: "Pátio", x: 5, y: 6, z: 7, yaw: 8 }]);
+const LOCATIONS = JSON.stringify([{ name: "Hogsmeade", x: 1, y: 2, z: 3, yaw: 4, camera: { x: 101, y: 202, z: 33 } }, { name: "Pátio", x: 5, y: 6, z: 7, yaw: 8, camera: { x: 105, y: 206, z: 37 } }]);
 
 function harness({ locations = LOCATIONS, core = true } = {}) {
   const handlers = {}, clientHandlers = {}, exportsRegistered = {}, serverEvents = [], logs = [], errors = [];
@@ -61,7 +61,7 @@ test("resourceStart registers the Spawn export and isReady turns true; resourceS
   const h = harness(); t.after(h.restore);
   h.start();
   const api = h.exportsRegistered["ms-spawn:Spawn"];
-  assert.equal(api.isReady(), true); assert.equal(api.version, "0.4.0");
+  assert.equal(api.isReady(), true); assert.equal(api.version, "0.5.2");
   assert.deepEqual(plain(api.locations()), [{ id: "hogsmeade", name: "Hogsmeade" }, { id: "patio", name: "Pátio" }]);
   assert.ok(h.logs.some(line => line.includes("ms-spawn ready")));
   h.stop(); assert.equal(api.isReady(), false);
@@ -185,10 +185,10 @@ test("CHG-01: select takes the hold over, teleports without snapToGround (CHG-03
   h.clientHandlers["ms-spawn:select"](player, { id: "patio", x: 99 }); await h.flush();
   assert.deepEqual(player.natives.map(entry => entry[0] + (entry[1]?.owner ? ":" + entry[1].owner : typeof entry[1] === "string" ? ":" + entry[1] : "")),
     ["hold:ms-spawn:preview", "release:ms-character:lobby", "release:ms-spawn:preview", "teleport"]);
-  assert.deepEqual(plain(player.natives.at(-1)), ["teleport", 5, 6, 7, { yaw: 8 }]);
+  assert.deepEqual(plain(player.natives.at(-1)), ["teleport", 105, 206, 37, { yaw: 8 }]);
   settleTeleport(h, player, 0); await h.flush();
   const hold = player.natives.at(-1)[1];
-  assert.deepEqual(plain(hold), { owner: "ms-spawn:preview", x: 5, y: 6, z: 7, mode: "clamp", radius: 0, radiusZ: 0, ttlMs: 1800000 });
+  assert.deepEqual(plain(hold), { owner: "ms-spawn:preview", x: 105, y: 206, z: 37, mode: "clamp", radius: 0, radiusZ: 0, ttlMs: 1800000 });
 });
 test("CHG-03: the real wiring sends timingLog (default on) in ms-spawn:open and teleports without snap", async t => {
   const h = harness(); t.after(h.restore); h.start();
@@ -243,4 +243,21 @@ test("SEC-12: ms-spawn:abandon is routed behind the ingress gate, reads no paylo
   assert.equal(cancelled.length, 1); assert.equal(cancelled[0].payload.reason, "CLIENT_ABORTED");
   assert.equal(states(player).at(-1).status, "closed"); assert.deepEqual(h.errors, []);
   h.stop();
+});
+
+// ---- CHG-05 (02.16, 02.17): preview target, destination, payload ----------------------------------------------------------
+test("CHG-05: the open payload carries the camera pose and no spawn point, lookAt or role; the confirm still emits the spawn point", async t => {
+  const h = harness({ locations: JSON.stringify([{ name: "Hogsmeade", x: 1, y: 2, z: 3, yaw: 4, icon: "hogsmeade.webp", camera: { x: 101, y: 202, z: 33, lookAt: { x: 50, y: 60, z: 70 } } }]) });
+  t.after(h.restore); h.start();
+  const player = h.join(1); h.request(1);
+  const open = plain(player.emitted.find(([name]) => name === "ms-spawn:open")[1]);
+  assert.deepEqual(Object.keys(open.locations[0]).sort(), ["camera", "icon", "id", "kind", "name"]);
+  assert.equal(open.locations[0].icon, "hogsmeade.webp");
+  assert.deepEqual(open.locations[0].camera.position, { x: 101, y: 202, z: 33 });
+  const text = JSON.stringify(open);
+  assert.equal(/lookAt|yaw\":4|\"x\":50/.test(text), false);
+  h.clientHandlers["ms-spawn:select"](player, { id: "hogsmeade", x: 99, camera: { x: 9, y: 9, z: 9 } }); await h.flush();
+  assert.deepEqual(plain(player.natives.at(-1)), ["teleport", 101, 202, 33, { yaw: 4 }]);
+  h.handlers.playerTeleportComplete(player, player.requestId, 0); await h.flush();
+  assert.deepEqual(plain(player.natives.at(-1)[1]), { owner: "ms-spawn:preview", x: 101, y: 202, z: 33, mode: "clamp", radius: 0, radiusZ: 0, ttlMs: 1800000 });
 });

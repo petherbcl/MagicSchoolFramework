@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><!-- PLACEHOLDER spawn icon: village at dusk. Replace with a real 128x128 image. -->
+<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2B3F63"/><stop offset="1" stop-color="#C98F6A"/></linearGradient></defs>
+<rect width="128" height="128" fill="url(#s)"/>
+<circle cx="98" cy="30" r="9" fill="#F3E3B5"/>
+<path d="M0 128V92l14-16 14 16v-8l16-20 16 20 12-12 14 14 12-10 14 12 16-6v62z" fill="#1B2A3A"/>
+<path d="M0 128V104h20l10-12 10 12h16l12-16 12 16h48v24z" fill="#13202B"/>
+<rect x="22" y="108" width="8" height="10" fill="#E8CF96"/><rect x="62" y="104" width="8" height="12" fill="#E8CF96"/><rect x="100" y="108" width="8" height="10" fill="#E8CF96"/>
+</svg>

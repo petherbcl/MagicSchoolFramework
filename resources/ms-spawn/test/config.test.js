@@ -7,14 +7,17 @@ const path = require("node:path");
 const { loadConfig, slugify } = require("../server/config");
 
 const load = (locations, extra = {}) => loadConfig({ ...(locations === undefined ? {} : { MS_SPAWN_LOCATIONS: typeof locations === "string" ? locations : JSON.stringify(locations) }), ...extra }, { envFile: null });
-const entry = (name, extra = {}) => ({ name, x: 1, y: 2, z: 3, yaw: 4, ...extra });
+const CAMERA = { x: 10, y: 20, z: 30 };
+const entry = (name, extra = {}) => ({ name, x: 1, y: 2, z: 3, yaw: 4, camera: CAMERA, ...extra });
 const code = expected => ({ name: "SpawnConfigError", code: expected });
 
 test("a valid list returns a frozen config with derived ids", () => {
   const config = load([entry("Sala Comum Slytherin"), entry("Hogsmeade", { x: -5.5 })]);
   assert.deepEqual(config.locations.map(item => item.id), ["sala-comum-slytherin", "hogsmeade"]);
-  assert.deepEqual({ ...config.locations[1] }, { id: "hogsmeade", name: "Hogsmeade", x: -5.5, y: 2, z: 3, yaw: 4 });
+  assert.deepEqual({ ...config.locations[1] }, { id: "hogsmeade", name: "Hogsmeade", x: -5.5, y: 2, z: 3, yaw: 4, camera: config.locations[1].camera });
+  assert.deepEqual({ ...config.locations[1].camera, lookAt: { ...config.locations[1].camera.lookAt } }, { x: 10, y: 20, z: 30, lookAt: { x: -5.5, y: 2, z: 3 } });
   assert.ok(Object.isFrozen(config) && Object.isFrozen(config.locations) && Object.isFrozen(config.locations[0]) && Object.isFrozen(config.camera));
+  assert.ok(Object.isFrozen(config.locations[0].camera) && Object.isFrozen(config.locations[0].camera.lookAt));
 });
 test("ids are slugs of the name and stable across loads", () => {
   assert.equal(slugify("Sala Comum Slytherin"), "sala-comum-slytherin");
@@ -27,15 +30,28 @@ test("zero entries (and an unset variable) are valid", () => {
   assert.deepEqual([...load([]).locations], []);
   assert.deepEqual([...load(undefined).locations], []);
 });
-test("the .env.example defaults are valid with 6 unique locations, copied exactly", () => {
+test("the .env.example defaults are valid with 6 unique locations, spawn points unchanged and a camera in each", () => {
   const file = path.join(__dirname, "..", ".env.example");
   const config = loadConfig({}, { envFile: file });
   assert.deepEqual(config.locations.map(item => item.name), ["Sala Comum Slytherin", "Sala Comum Hufflepuff", "Sala Comum Gryffindor", "Sala Comum Ravenclaw", "Pátio de Hogwarts", "Hogsmeade"]);
   assert.equal(new Set(config.locations.map(item => item.id)).size, 6);
-  assert.deepEqual({ ...config.locations[0] }, { id: "sala-comum-slytherin", name: "Sala Comum Slytherin", role: "slytherin", x: 359573, y: -451727.25, z: -85308.25, yaw: -146.48 });
+  const spawnPoint = ({ x, y, z, yaw }) => ({ x, y, z, yaw });
+  assert.deepEqual(config.locations.map(spawnPoint), [
+    { x: 359573, y: -451727.25, z: -85308.25, yaw: -146.48 }, { x: 362522.25, y: -445054.25, z: -83609.5, yaw: -107.16 },
+    { x: 353218.75, y: -450775, z: -79306.5, yaw: 10.53 }, { x: 357398.75, y: -455215.5, z: -77308, yaw: -80.18 },
+    { x: 368521.5, y: -458878.75, z: -82609.5, yaw: -16.3 }, { x: 395037.5, y: -519061, z: -82090.25, yaw: 112.24 }]);
   assert.deepEqual(config.locations.map(item => item.role), ["slytherin", "hufflepuff", "gryffindor", "ravenclaw", undefined, undefined]);
-  assert.deepEqual({ ...config.locations[5] }, { id: "hogsmeade", name: "Hogsmeade", x: 395037.5, y: -519061, z: -82090.25, yaw: 112.24 });
+  assert.deepEqual(config.locations.map(item => item.icon), ["slytherin.png", "hufflepuff.png", "gryffindor.png", "ravenclaw.png", undefined, undefined]);
+  assert.equal(config.locations[0].id, "sala-comum-slytherin");
+  // Every default has a camera position; the aiming is lookAt (default mode resolves it to the spawn point) or yaw mode (CHG-06).
+  assert.ok(config.locations.every(item => item.camera && [item.camera.x, item.camera.y, item.camera.z].every(Number.isFinite)
+    && (item.camera.lookAt ? Number.isFinite(item.camera.lookAt.x) : Number.isFinite(item.camera.yaw))));
   assert.equal(config.camera.durationMs, 1500);
+  // The cameras of .env.example are tuned by the user (any aiming mode), so only their validity is asserted, not a derivation.
+});
+test("every icon file named in the .env.example exists in ui-src/public/icons", () => {
+  const config = loadConfig({}, { envFile: path.join(__dirname, "..", ".env.example") });
+  for (const item of config.locations) if (item.icon) assert.ok(fs.existsSync(path.join(__dirname, "..", "ui-src", "public", "icons", item.icon)), item.icon);
 });
 test("invalid configurations fail closed with a stable code", () => {
   assert.throws(() => load("[{"), code("LOCATIONS_INVALID_JSON"));
@@ -58,7 +74,7 @@ test("invalid configurations fail closed with a stable code", () => {
   assert.throws(() => load([entry("A", { y: null })]), code("LOCATION_NUMBER_INVALID"));
   assert.throws(() => load([entry("A", { z: 1e9 })]), code("LOCATION_NUMBER_INVALID"));
   assert.throws(() => load('[{"name":"A","x":1e999,"y":0,"z":0,"yaw":0}]'), code("LOCATION_NUMBER_INVALID"));
-  assert.throws(() => load([{ name: "A", x: 1, y: 2, z: 3 }]), code("LOCATION_NUMBER_INVALID"));
+  assert.throws(() => load([{ name: "A", x: 1, y: 2, z: 3, camera: CAMERA }]), code("LOCATION_NUMBER_INVALID"));
   assert.throws(() => load([entry("A", { extra: 1 })]), code("LOCATION_INVALID_ENTRY"));
   assert.throws(() => load([null]), code("LOCATION_INVALID_ENTRY"));
   assert.throws(() => load([[1]]), code("LOCATION_INVALID_ENTRY"));
@@ -83,7 +99,7 @@ test("process env overrides the .env file", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ms-spawn-"));
   const file = path.join(directory, ".env");
   try {
-    fs.writeFileSync(file, `MS_SPAWN_LOCATIONS='[{"name":"Do ficheiro","x":1,"y":2,"z":3,"yaw":4}]'\nMS_SPAWN_AREA_TIMEOUT_MS=2000\n`);
+    fs.writeFileSync(file, `MS_SPAWN_LOCATIONS='[{"name":"Do ficheiro","x":1,"y":2,"z":3,"yaw":4,"camera":{"x":9,"y":9,"z":9}}]'\nMS_SPAWN_AREA_TIMEOUT_MS=2000\n`);
     assert.deepEqual(loadConfig({}, { envFile: file }).locations.map(item => item.id), ["do-ficheiro"]);
     const merged = loadConfig({ MS_SPAWN_LOCATIONS: JSON.stringify([entry("Do processo")]) }, { envFile: file });
     assert.deepEqual(merged.locations.map(item => item.id), ["do-processo"]);
@@ -120,10 +136,10 @@ test("CHG-03: preview snap defaults to false and timing log to true; both parse 
 });
 
 // CHG-04 (STORY-01.06): optional role per location.
-const roleEntry = (name, role) => ({ name, x: 1, y: 2, z: 3, yaw: 4, ...(role === undefined ? {} : { role }) });
+const roleEntry = (name, role) => ({ name, x: 1, y: 2, z: 3, yaw: 4, camera: CAMERA, ...(role === undefined ? {} : { role }) });
 test("01.06: a valid role is stored without changing id, name or coordinates", () => {
   const [a] = load([roleEntry("Sala Comum Gryffindor", "gryffindor")]).locations;
-  assert.deepEqual({ ...a }, { id: "sala-comum-gryffindor", name: "Sala Comum Gryffindor", x: 1, y: 2, z: 3, yaw: 4, role: "gryffindor" });
+  assert.deepEqual({ ...a }, { id: "sala-comum-gryffindor", name: "Sala Comum Gryffindor", x: 1, y: 2, z: 3, yaw: 4, role: "gryffindor", camera: a.camera });
   assert.ok(Object.isFrozen(a));
   for (const role of ["a", "x".repeat(32), "my_role-2"]) assert.equal(load([roleEntry("L", role)]).locations[0].role, role);
 });
@@ -142,4 +158,111 @@ test("01.06: the role is not part of the slug or the uniqueness checks", () => {
 });
 test("01.06: a well formed role that no character has is accepted", () => {
   assert.equal(load([roleEntry("L", "nobody-has-this")]).locations[0].role, "nobody-has-this");
+});
+
+// CHG-05 (STORY-01.07): mandatory camera with optional lookAt.
+const camErr = { name: "SpawnConfigError", code: "LOCATION_CAMERA_INVALID" };
+const withCamera = camera => ({ name: "Cam", x: 1, y: 2, z: 3, yaw: 4, ...(camera === undefined ? {} : { camera }) });
+test("01.07: a valid camera is stored without changing id, name, role or the spawn point; lookAt defaults to the spawn point", () => {
+  const [a] = load([entry("Sala A", { role: "r1" })]).locations;
+  assert.deepEqual({ ...a, camera: { ...a.camera, lookAt: { ...a.camera.lookAt } } }, { id: "sala-a", name: "Sala A", x: 1, y: 2, z: 3, yaw: 4, role: "r1", camera: { x: 10, y: 20, z: 30, lookAt: { x: 1, y: 2, z: 3 } } });
+});
+test("01.07: an explicit lookAt is kept and the result is frozen in depth", () => {
+  const [a] = load([entry("A", { camera: { x: 10, y: 20, z: 30, lookAt: { x: 7, y: 8, z: 9 } } })]).locations;
+  assert.deepEqual({ ...a.camera.lookAt }, { x: 7, y: 8, z: 9 });
+  assert.ok(Object.isFrozen(a) && Object.isFrozen(a.camera) && Object.isFrozen(a.camera.lookAt));
+  // The spawn point written out as lookAt is allowed (it is not the camera).
+  assert.equal(load([entry("A", { camera: { x: 10, y: 20, z: 30, lookAt: { x: 1, y: 2, z: 3 } } })]).locations.length, 1);
+});
+test("01.07: a missing or malformed camera fails closed with LOCATION_CAMERA_INVALID", () => {
+  const bad = [undefined, null, "x", [1, 2, 3], 5, {}, { x: 1, y: 2 }, { x: 1, z: 3 }, { y: 2, z: 3 }, { x: NaN, y: 2, z: 3 }, { x: "1", y: 2, z: 3 }, { x: 1, y: null, z: 3 },
+    { x: 1e8, y: 2, z: 3 }, { x: 1, y: 2, z: -1e8 }, { x: 1, y: 2, z: 3, extra: 1 },
+    { x: 1, y: 2, z: 3, lookAt: null }, { x: 1, y: 2, z: 3, lookAt: "a" }, { x: 1, y: 2, z: 3, lookAt: [1, 2, 3] }, { x: 1, y: 2, z: 3, lookAt: { x: 1, y: 2 } },
+    { x: 1, y: 2, z: 3, lookAt: { x: 1, y: 2, z: "3" } }, { x: 1, y: 2, z: 3, lookAt: { x: 1e9, y: 2, z: 3 } }, { x: 1, y: 2, z: 3, lookAt: { x: 5, y: 5, z: 5, w: 1 } }];
+  for (const camera of bad) assert.throws(() => load([withCamera(camera)]), camErr, JSON.stringify(camera));
+  assert.throws(() => load('[{"name":"A","x":1,"y":2,"z":3,"yaw":4,"camera":{"x":1e999,"y":2,"z":3}}]'), camErr);
+});
+test("01.07: a camera without direction is invalid (G21): equal to its lookAt, or without lookAt equal to the spawn point", () => {
+  assert.throws(() => load([withCamera({ x: 1, y: 2, z: 3 })]), camErr);
+  assert.throws(() => load([withCamera({ x: 5, y: 6, z: 7, lookAt: { x: 5, y: 6, z: 7 } })]), camErr);
+  assert.equal(load([withCamera({ x: 1, y: 2, z: 3, lookAt: { x: 5, y: 6, z: 7 } })]).locations.length, 1); // a camera at the spawn point is fine with another lookAt
+});
+test("01.07: the camera error names the location and the field, never a value", () => {
+  try { load([withCamera({ x: 1, y: 2, z: "secreto-123", lookAt: { x: 4, y: 5, z: 6 } })]); assert.fail("expected an error"); }
+  catch (error) { assert.equal(error.code, "LOCATION_CAMERA_INVALID"); assert.match(error.message, /Cam/); assert.match(error.message, /camera\.z/); assert.doesNotMatch(error.message, /secreto|123/); }
+  try { load([withCamera({ x: 1, y: 2, z: 3, lookAt: { x: 4, y: 5, z: NaN } })]); assert.fail("expected an error"); }
+  catch (error) { assert.match(error.message, /camera\.lookAt\.z/); }
+});
+test("01.07: the old format (no camera) is refused, zero entries stay valid", () => {
+  assert.throws(() => load('[{"name":"Hogsmeade","x":1,"y":2,"z":3,"yaw":4}]'), camErr);
+  assert.deepEqual([...load("[]").locations], []);
+});
+test("01.07: the camera takes no part in the slug or the uniqueness checks", () => {
+  assert.equal(load([entry("A", { camera: { x: 5, y: 5, z: 5 } }), entry("B", { camera: { x: 5, y: 5, z: 5 } })]).locations.length, 2);
+});
+
+// CHG-05 (STORY-01.08): optional icon file name.
+test("01.08: a valid icon is stored; missing, empty and null mean no icon", () => {
+  for (const icon of ["a.png", "slytherin.png", "hogs_meade-2.webp", "x.jpg", "x.jpeg", "x.svg", "a".repeat(60) + ".png"]) assert.equal(load([entry("L", { icon })]).locations[0].icon, icon, icon);
+  for (const icon of [undefined, "", null]) assert.equal("icon" in load([entry("L", { icon })]).locations[0], false, String(icon));
+});
+test("01.08: a malformed icon fails closed with LOCATION_ICON_INVALID", () => {
+  const bad = ["a.gif", "a.PNG", "A.png", "a", ".png", "a.png.exe", "a b.png", "../a.png", "dir/a.png", "dir\\a.png", "a.png ", " a.png", "é.png", "a.png\n", "a".repeat(61) + ".png", "http://x/a.png", "a.svg?x=1", 5, true, ["a.png"], {}];
+  for (const icon of bad) assert.throws(() => load([entry("L", { icon })]), { name: "SpawnConfigError", code: "LOCATION_ICON_INVALID" }, JSON.stringify(icon));
+});
+test("01.08: the icon is not part of the slug, the role or the uniqueness checks", () => {
+  assert.throws(() => load([entry("Hogsmeade", { icon: "a.png" }), entry("Hogsmeade")]), { code: "LOCATION_NAME_DUPLICATE" });
+  assert.equal(load([entry("A", { icon: "same.png" }), entry("B", { icon: "same.png" })]).locations.length, 2);
+  assert.equal(load([entry("A", { icon: "a.png", role: "x" })]).locations[0].id, "a");
+});
+
+// CHG-05 (STORY-06.13): the README examples are valid config and use only coordinates of the six default locations.
+test("06.13: the JSON examples in the README load through the real config and use only known coordinates", () => {
+  const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
+  const blocks = [...readme.matchAll(/```json\r?\n([\s\S]*?)```/g)].map(match => JSON.parse(match[1]));
+  assert.ok(blocks.length >= 2);
+  const known = loadConfig({}, { envFile: path.join(__dirname, "..", ".env.example") }).locations;
+  for (const block of blocks) {
+    const config = load(block);
+    for (const item of config.locations) {
+      const home = known.find(entry => entry.name === item.name);
+      assert.ok(home, item.name);
+      // Only the spawn point is compared: the camera of .env.example is tuned by the user and the README examples are illustrations.
+      assert.deepEqual([item.x, item.y, item.z, item.yaw], [home.x, home.y, home.z, home.yaw]);
+    }
+  }
+});
+
+// CHG-06 (STORY-01.09): camera aiming modes lookAt | yaw (+pitch) | default.
+test("01.09: yaw mode stores yaw and pitch (default 0), frozen, without lookAt, and keeps the spawn point", () => {
+  const [a, b] = load([entry("A", { camera: { x: 10, y: 20, z: 30, yaw: 90 } }), entry("B", { camera: { x: 10, y: 20, z: 30, yaw: -45.5, pitch: 12.25 } })]).locations;
+  assert.deepEqual({ ...a.camera }, { x: 10, y: 20, z: 30, yaw: 90, pitch: 0 });
+  assert.deepEqual({ ...b.camera }, { x: 10, y: 20, z: 30, yaw: -45.5, pitch: 12.25 });
+  assert.ok(Object.isFrozen(a.camera) && !("lookAt" in a.camera));
+  assert.deepEqual([a.x, a.y, a.z, a.yaw], [1, 2, 3, 4]);
+});
+test("01.09: yaw and pitch limits are inclusive (yaw -360..360, pitch -89..89)", () => {
+  for (const yaw of [-360, 0, 360]) assert.equal(load([withCamera({ x: 10, y: 20, z: 30, yaw })]).locations.length, 1);
+  for (const pitch of [-89, 0, 89]) assert.equal(load([withCamera({ x: 10, y: 20, z: 30, yaw: 0, pitch })]).locations.length, 1);
+  for (const yaw of [360.01, -360.01, 1e9]) assert.throws(() => load([withCamera({ x: 10, y: 20, z: 30, yaw })]), camErr, String(yaw));
+  for (const pitch of [89.01, -89.01, 90]) assert.throws(() => load([withCamera({ x: 10, y: 20, z: 30, yaw: 0, pitch })]), camErr, String(pitch));
+});
+test("01.09: fail-closed combinations: lookAt with yaw/pitch, pitch without yaw, null or non-numeric yaw/pitch (G33)", () => {
+  const P = { x: 10, y: 20, z: 30 }, L = { x: 5, y: 6, z: 7 };
+  const bad = [{ ...P, lookAt: L, yaw: 0 }, { ...P, lookAt: L, pitch: 0 }, { ...P, lookAt: L, yaw: 0, pitch: 0 }, { ...P, pitch: 10 },
+    { ...P, yaw: null }, { ...P, yaw: "90" }, { ...P, yaw: NaN }, { ...P, yaw: Infinity }, { ...P, yaw: true }, { ...P, yaw: [1] }, { ...P, yaw: undefined, pitch: 1 },
+    { ...P, yaw: 0, pitch: null }, { ...P, yaw: 0, pitch: "5" }, { ...P, yaw: 0, pitch: NaN }, { ...P, yaw: 0, pitch: {} }, { ...P, pitch: null }];
+  for (const camera of bad) assert.throws(() => load([withCamera(camera)]), camErr, JSON.stringify(camera));
+  assert.throws(() => load('[{"name":"A","x":1,"y":2,"z":3,"yaw":4,"camera":{"x":1,"y":2,"z":9,"yaw":1e999}}]'), camErr);
+});
+test("01.09: G21 does not apply to yaw mode (camera may sit at the spawn point) but still applies to lookAt and default", () => {
+  assert.equal(load([withCamera({ x: 1, y: 2, z: 3, yaw: 10 })]).locations.length, 1);
+  assert.throws(() => load([withCamera({ x: 1, y: 2, z: 3 })]), camErr);
+  assert.throws(() => load([withCamera({ x: 1, y: 2, z: 3, lookAt: { x: 1, y: 2, z: 3 } })]), camErr);
+});
+test("01.09: the yaw error names location and field, never a value", () => {
+  try { load([withCamera({ x: 1, y: 2, z: 3, yaw: "secreto-123" })]); assert.fail("expected"); }
+  catch (error) { assert.equal(error.code, "LOCATION_CAMERA_INVALID"); assert.match(error.message, /Cam/); assert.match(error.message, /camera\.yaw/); assert.doesNotMatch(error.message, /secreto|123/); }
+  try { load([withCamera({ x: 1, y: 2, z: 3, yaw: 0, pitch: 500 })]); assert.fail("expected"); }
+  catch (error) { assert.match(error.message, /camera\.pitch/); }
 });

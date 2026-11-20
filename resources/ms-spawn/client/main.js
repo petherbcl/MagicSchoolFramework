@@ -7,6 +7,9 @@
 //    the server-derived departure pose under the cover, then lifts the cover and plays the aerial swoop to the target pose,
 //  - covers the screen again after a confirm until the world at the final position is loaded, then fades, restores
 //    camera and body and closes the page,
+//  - while the player chooses, takes world collision and gravity away (CHG-07: LocalPlayer.setCollision(false) + suspendGravity) so
+//    the preview never hurts, and gives them back in the order resetFall, setCollision(true), restoreGravity: on every exit that
+//    does not confirm, and on a confirm only at the end of the flow (final world loaded), just before the cover lifts,
 //  - always hands the camera and the body back (closed, error, stop, session lost, watchdog).
 // The client never computes targets and never receives a spawn point. Page <-> client contract: ui-src/src/bridge.js.
 // Controls are owned by ms-character (disabled in its lobby, restored when it reports "playing"): not touched here.
@@ -30,7 +33,7 @@ const DEFAULT_AREA_TIMEOUT_MS = 15000;
 
 let view = null, pageReady = false;
 let locations = new Map();          // id -> { position, rotation, departure } from ms-spawn:open
-let pageLocations = null;           // what the page gets: {id, name, kind} only
+let pageLocations = null;           // what the page gets: {id, name, kind, icon?} only (icon = a validated file name, CHG-05)
 let timingLog = false;              // CHG-03: from ms-spawn:open (boolean, absent = false); the page never receives it
 let flightConfig = { durationMs: 1500, easing: "easeInOut" }, areaTimeoutMs = DEFAULT_AREA_TIMEOUT_MS;
 let lastState = null, lastCamera = null, coverState = null;
@@ -40,6 +43,9 @@ let pollTimer = null, ackTimer = null, applyTimer = null, fadeTimer = null;
 let cameraTouched = false;
 let lastSelectAt = -Infinity, pendingSelect = null, pendingTimer = null;
 let bodyTouched = false, bodyHidden = false, bodyTimer = null, bodyTries = 0;
+// CHG-07: movementTouched = this open took (or is taking) collision and gravity and owes the restore; the two flags below say
+// which parts are settled so the retry loop never repeats a call (gravity answers true even without a pawn, collision needs one).
+let movementTouched = false, gravitySettled = false, collisionSettled = false;
 
 function attempt(label, fn) {
   try { return fn(); } catch (error) {
@@ -55,6 +61,9 @@ function parse(value) {
   return value !== null && typeof value === "object" ? value : null;
 }
 const finite = value => typeof value === "number" && Number.isFinite(value);
+// CHG-05: same rule as the server config (a file name inside icons/); anything else is dropped so the page never builds an odd URL.
+const ICON_PATTERN = /^[a-z0-9_-]+\.(png|webp|jpg|jpeg|svg)$/;
+const validIcon = value => typeof value === "string" && value.length <= 64 && ICON_PATTERN.test(value);
 const validId = value => typeof value === "string" && value.length > 0 && value.length <= 64;
 // An unexpected error in any handler ends the whole selection safely (camera, body, page) instead of leaving a cover or a hidden body.
 const guarded = (label, fn) => (...args) => {
@@ -71,19 +80,38 @@ const guarded = (label, fn) => (...args) => {
 
 // ---- Own body (CHG-02) -----------------------------------------------------------------------------------------------
 
-// setVisibility(false) returns false while there is no pawn: retry on a bounded schedule, never throw.
+// setVisibility(false) and setCollision(false) return false while there is no pawn: retry on a bounded schedule, never throw.
+// CHG-07: the movement part rides the same attempt and the same bounded retry. A call that throws is logged once by attempt()
+// and counted as settled (it is not retried), so a broken native never blocks the flow nor floods the log.
 function hideBody() {
   bodyTimer = cancelTimer(bodyTimer);
-  if (bodyHidden) return;
+  const movementPending = movementTouched && !(gravitySettled && collisionSettled);
+  if (bodyHidden && !movementPending) return;
   bodyTouched = true;
-  const ok = attempt("hideBody", () => LocalPlayer.setVisibility(false));
-  if (ok === true) { bodyHidden = true; bodyTries = 0; return; }
+  if (!bodyHidden) {
+    const ok = attempt("hideBody", () => LocalPlayer.setVisibility(false));
+    if (ok === true) bodyHidden = true;
+  }
+  if (movementTouched) {
+    if (!gravitySettled) { const g = attempt("suspendGravity", () => LocalPlayer.suspendGravity()); if (g !== false) gravitySettled = true; }
+    if (!collisionSettled) { const c = attempt("setCollision(false)", () => LocalPlayer.setCollision(false)); if (c !== false) collisionSettled = true; }
+  }
+  if (bodyHidden && (!movementTouched || (gravitySettled && collisionSettled))) { bodyTries = 0; return; }
   if (++bodyTries >= BODY_RETRY_MAX) {
     bodyTries = 0;
-    if (typeof console !== "undefined" && console.log) console.log("[ms-spawn] warning: the local body could not be hidden (no pawn); continuing");
+    if (typeof console !== "undefined" && console.log) console.log("[ms-spawn] warning: the local body or collision could not be set (no pawn); continuing");
     return;
   }
   bodyTimer = setTimeout(hideBody, BODY_RETRY_MS);
+}
+// CHG-07: idempotent, once per open, flag set before acting. Order matters (LocalPlayer.md): resetFall before collision comes back.
+// Every call is independent: one that throws never skips the others.
+function restoreMovement() {
+  if (!movementTouched) return;
+  movementTouched = false; gravitySettled = false; collisionSettled = false;
+  attempt("resetFall", () => LocalPlayer.resetFall());
+  attempt("setCollision(true)", () => LocalPlayer.setCollision(true));
+  attempt("restoreGravity", () => LocalPlayer.restoreGravity());
 }
 // Idempotent: the body is given back once per hide, on every exit.
 function restoreBody() {
@@ -126,11 +154,14 @@ function setCamera(status, id) { lastCamera = { status, id }; sendToPage("camera
 
 // Area loaded: the world streams around the player, who the server holds at the selected point, so the ground under the
 // target pose exists when a vertical World.lineTrace hits. A null result can mean "not loaded yet"
-// (docs/arcane-mp/guides/world/line-traces.md). Documented ground pattern: start z+100, end z-10000, level and water only.
+// (docs/arcane-mp/guides/world/line-traces.md). Level and water only. CHG-05 (G19): the probe runs below the camera position
+// (the point the server teleported the player to), which may sit well above the ground, so it starts at z+100 and
+// reaches 20000 cm down (the documented pattern ended at z-10000).
 // UI only: the server decides whether a confirm is accepted and never reads it.
 const GROUND_OBJECT_TYPES = ["worldStatic", "shallowWater", "deepWater"];
+const PROBE_UP_CM = 100, PROBE_DEPTH_CM = 20000;
 function areaLoaded(position) {
-  const hit = World.lineTrace({ x: position.x, y: position.y, z: position.z + 100 }, { x: position.x, y: position.y, z: position.z - 10000 }, { objectTypes: GROUND_OBJECT_TYPES });
+  const hit = World.lineTrace({ x: position.x, y: position.y, z: position.z + PROBE_UP_CM }, { x: position.x, y: position.y, z: position.z + PROBE_UP_CM - PROBE_DEPTH_CM }, { objectTypes: GROUND_OBJECT_TYPES });
   return Boolean(hit) && hit.startPenetrating !== true;
 }
 
@@ -260,6 +291,7 @@ function confirmCover(id) {
   ackTimer = setTimeout(guarded("confirm ack", () => {
     ackTimer = null;
     if (phase !== "confirming") return;
+    restoreMovement(); // CHG-07: unanswered-confirm guard (not a confirm path), same order as every non-confirm exit
     phase = "arrived"; setCover(false, "confirm");
     lastState = { status: "choosing", selectedId: id, notice: CONFIRM_UNANSWERED_NOTICE };
     serverStatus = "choosing";
@@ -284,6 +316,7 @@ function pollFinal(f) {
 }
 function liftFinal() {
   pollTimer = cancelTimer(pollTimer); sel = null;
+  restoreMovement(); // CHG-07: the final world is loaded (or the ceiling hit); the cover is still opaque
   phase = "leaving";
   setCover(false, "confirm");
   // The page fades out in 150 ms; only after that the camera and the body come back and the page closes (decision 6).
@@ -344,7 +377,8 @@ function ensureView() {
 function teardown(duration) {
   pendingTimer = cancelTimer(pendingTimer); pendingSelect = null;
   stopPolling();
-  if (coverState && coverState.visible) setCover(false, coverState.moment);
+  restoreMovement(); // CHG-07 / SEC-17: first, it never throws (every native call is inside attempt)
+  if (coverState && coverState.visible) attempt("setCover", () => setCover(false, coverState.moment)); // SEC-17: Web.emit may throw
   restoreCamera(duration);
   restoreBody();
   closeView();
@@ -362,7 +396,7 @@ Events.on("ms-spawn:open", guarded("open", value => {
   locations = new Map(items.map(item => [item.id, { position: item.camera.position, rotation: item.camera.rotation,
     // An older server sends no departure pose: the swoop then starts at the target pose (nothing is computed here).
     departure: validPose(item.camera.departure) ? item.camera.departure : item.camera }]));
-  pageLocations = items.map(item => ({ id: item.id, name: item.name, kind: item.kind === "last" ? "last" : "config" }));
+  pageLocations = items.map(item => ({ id: item.id, name: item.name, kind: item.kind === "last" ? "last" : "config", ...(item.kind !== "last" && validIcon(item.icon) ? { icon: item.icon } : {}) }));
   const flightInput = parse(payload.flight);
   flightConfig = {
     durationMs: flightInput && finite(flightInput.durationMs) ? Math.max(300, Math.min(10000, flightInput.durationMs)) : 1500,
@@ -371,7 +405,8 @@ Events.on("ms-spawn:open", guarded("open", value => {
   timingLog = payload.timingLog === true; // CHG-03: absent (older server) = off
   areaTimeoutMs = finite(payload.areaTimeoutMs) ? Math.max(1000, Math.min(60000, payload.areaTimeoutMs)) : DEFAULT_AREA_TIMEOUT_MS;
   lastState = null; lastCamera = null; coverState = null; lastSelectAt = -Infinity; phase = "idle"; serverStatus = null;
-  bodyTries = 0; hideBody(); // once per open: a no-op when the body is already hidden
+  movementTouched = true; // CHG-07: set before acting; a re-open keeps the hold (settled flags stop a second suspend)
+  bodyTries = 0; hideBody(); // once per open: a no-op when body and movement are already set
   ensureView();
   flush();
   ackOpened(); // the page may already be up from a previous selection: its "ready" will not fire again

@@ -20,9 +20,15 @@ const OPEN = { locations: [
 ], flight: { durationMs: 1500, easing: "easeOut" }, areaTimeoutMs: 4000 };
 const target = x => ({ position: { x, y: 2, z: 3 }, rotation: { pitch: -26.57, yaw: x === 20 ? 90 : 0, roll: 0 } });
 
-function harness({ captureNull = false, activateThrows = false, animateThrows = false, activateResult = true, trace = null, visibility = () => true, position = () => ({ x: 7, y: 8, z: 9 }), emitThrows = false, logs = [], world = null, levelObjects = null } = {}) {
+function harness({ captureNull = false, activateThrows = false, animateThrows = false, activateResult = true, trace = null, visibility = () => true, position = () => ({ x: 7, y: 8, z: 9 }), emitThrows = false, logs = [], world = null, levelObjects = null, movement = {} } = {}) {
   const calls = [], handlers = {}, viewHandlers = {};
-  let timers = [], nextTimer = 1, now = 1000;
+  let timers = [], nextTimer = 1, now = 1000, webBroken = false;
+  const move = (name, args) => {
+    calls.push([name, ...args]);
+    const rule = movement[name];
+    if (rule && rule.throws) throw new Error("boom");
+    return typeof rule === "function" ? rule(...args) : true;
+  };
   const camera = { active: false, playing: false };
   const Camera = {
     get active() { return camera.active; }, get playing() { return camera.playing; },
@@ -40,9 +46,12 @@ function harness({ captureNull = false, activateThrows = false, animateThrows = 
     clearTimeout: id => { timers = timers.filter(timer => timer.id !== id); },
     Events: { on: (name, fn) => { handlers[name] = fn; }, emitServer: (name, payload) => { if (emitThrows && name === "ms-spawn:select") throw new Error("boom"); calls.push(["emitServer", name, payload]); } },
     Web: { createView: (url, options) => { calls.push(["createView", url, options]); return 1; }, destroyView: () => calls.push(["destroyView"]),
-      on: (_view, name, fn) => { viewHandlers[name] = fn; }, emit: (_view, name, payload) => calls.push(["emit", name, payload]) },
+      on: (_view, name, fn) => { viewHandlers[name] = fn; }, emit: (_view, name, payload) => { if (webBroken) throw new Error("boom"); calls.push(["emit", name, payload]); } },
     Camera,
-    LocalPlayer: { setVisibility: visible => { calls.push(["setVisibility", visible]); return typeof visibility === "function" ? visibility(visible) : visibility; }, getPosition: () => position() },
+    LocalPlayer: { setVisibility: visible => { calls.push(["setVisibility", visible]); return typeof visibility === "function" ? visibility(visible) : visibility; }, getPosition: () => position(),
+      // CHG-07 fakes: each answers true unless movement.<name> says otherwise (a function result, or { throws: true })
+      suspendGravity: () => move("suspendGravity", []), restoreGravity: () => move("restoreGravity", []),
+      setCollision: enable => move("setCollision", [enable]), resetFall: () => move("resetFall", []) },
     ...(trace || world ? { World: { ...(trace ? { lineTrace: (start, end, options) => { calls.push(["lineTrace", start, end, options]); return trace(start, end, options); } } : {}), ...(world || {}) } } : {}),
     ...(levelObjects ? { LevelObjects: levelObjects } : {}),
   };
@@ -60,7 +69,7 @@ function harness({ captureNull = false, activateThrows = false, animateThrows = 
   const covers = () => calls.filter(call => call[0] === "emit" && call[1] === "cover").map(call => call[2]);
   const toPage = name => calls.filter(call => call[0] === "emit" && call[1] === name).map(call => call[2]);
   const server = name => calls.filter(call => call[0] === "emitServer" && call[1] === name).map(call => call[2]);
-  const h = { Camera, calls, logs, advance, named, toPage, covers, server, camera, handlers, viewHandlers, clear: () => { calls.length = 0; },
+  const h = { breakWeb: () => { webBroken = true; }, Camera, calls, logs, advance, named, toPage, covers, server, camera, handlers, viewHandlers, clear: () => { calls.length = 0; },
     open: (payload = OPEN) => { handlers["ms-spawn:open"](payload); viewHandlers.ready(); },
     state: payload => handlers["ms-spawn:state"](payload),
     select: id => viewHandlers.select({ id }),
@@ -75,7 +84,7 @@ const lifted = (h, id) => { h.select(id); h.state({ status: "choosing", selected
 // full path to the arrived state
 const arrivedAt = (h, id) => { lifted(h, id); land(h); };
 
-const stripped = list => list.map(({ id, name, kind }) => ({ id, name, kind }));
+const stripped = list => list.map(({ id, name, kind, icon }) => ({ id, name, kind, ...(icon ? { icon } : {}) }));
 const covered = (h, visible) => h.covers().at(-1)?.visible === visible;
 
 // ---- view, forwarding ---------------------------------------------------------------------------------------------------
@@ -179,7 +188,7 @@ test("04.05: the probe uses the documented arguments at the target pose", () => 
   const h = harness({ trace: hit });
   h.open(); h.select("hogsmeade"); h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "done" });
   const [, start, end, options] = h.named("lineTrace")[0];
-  same([start, end, options], [{ x: 20, y: 2, z: 103 }, { x: 20, y: 2, z: -9997 }, { objectTypes: GROUND }]);
+  same([start, end, options], [{ x: 20, y: 2, z: 103 }, { x: 20, y: 2, z: -19897 }, { objectTypes: GROUND }]); // CHG-05 (G19): from camera z+100, 20000 cm down
 });
 test("04.05: a new select restarts the ceiling for the new point; the old result never lifts the cover; the cover never toggles", () => {
   const h = harness({ trace: () => null });
@@ -421,7 +430,7 @@ test("04.07: after closed, the cover waits for the final world, then fades; came
   h.viewHandlers.confirm({ id: "hogsmeade" }); h.state({ status: "applying", selectedId: "hogsmeade" }); h.clear();
   h.state({ status: "closed" });
   assert.equal(h.named("destroyView").length, 0); assert.equal(h.covers().some(c => !c.visible), false);
-  same(h.named("lineTrace")[0].slice(1, 3), [{ x: 7, y: 8, z: 109 }, { x: 7, y: 8, z: -9991 }]); // the local player's own position
+  same(h.named("lineTrace")[0].slice(1, 3), [{ x: 7, y: 8, z: 109 }, { x: 7, y: 8, z: -19891 }]); // the local player's own position
   h.advance(500);
   same(h.covers().at(-1), { visible: false, moment: "confirm" });
   assert.equal(h.named("restore").length + h.named("destroyView").length, 0, "not before the fade");
@@ -569,4 +578,198 @@ test("CHG-03: a ceiling without the teleport result also logs once, with toTelep
   h.open(timed()); h.select("hogsmeade"); h.advance(4300);
   const lines = timingLines(h);
   assert.equal(lines.length, 1); assert.match(lines[0], /toTeleportDoneMs=null toGroundHitMs=null .* ceiling=true/);
+});
+
+// ---- CHG-05: icon forwarding and the deeper ground probe ---------------------------------------------------------------------
+test("04.08/05.11: a valid icon is forwarded to the page with id, name and kind; last never gets one", () => {
+  const h = harness();
+  h.open({ ...OPEN, locations: [{ ...OPEN.locations[0], icon: "star.png" }, { ...OPEN.locations[1], icon: "hogsmeade.webp" }, OPEN.locations[2]] });
+  same(h.toPage("open")[0].locations, [{ id: "last", name: "Última localização", kind: "last" }, { id: "hogsmeade", name: "Hogsmeade", kind: "config", icon: "hogsmeade.webp" }, { id: "patio", name: "Pátio", kind: "config" }]);
+});
+test("04.08/05.11: an icon that is not a plain file name is dropped before it reaches the page", () => {
+  const bad = ["../x.png", "a/b.png", "x.gif", "X.png", "x.png?a=1", "http://x/y.png", "", 5, null, ["a.png"], "a".repeat(61) + ".png"];
+  for (const icon of bad) {
+    const h = harness(); h.open({ ...OPEN, locations: [{ ...OPEN.locations[1], icon }] });
+    same(h.toPage("open")[0].locations, [{ id: "hogsmeade", name: "Hogsmeade", kind: "config" }]);
+  }
+});
+test("04.08/05.11: nothing but id, name, kind and icon reaches the page (no camera, no lookAt, no spawn point, no role)", () => {
+  const h = harness();
+  h.open({ ...OPEN, locations: [{ ...OPEN.locations[1], icon: "a.png", role: "r", lookAt: { x: 1, y: 2, z: 3 }, x: 5, y: 6, z: 7, yaw: 8 }] });
+  same(Object.keys(h.toPage("open")[0].locations[0]).sort(), ["icon", "id", "kind", "name"]);
+});
+test("04.08: the probe runs below the camera position and a camera well above the ground still hits (deeper than the old z-10000)", () => {
+  const h = harness({ trace: (start, end) => (end.z <= -15000 ? hit() : null) });
+  h.open(); h.select("hogsmeade"); h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "done" });
+  const [, start, end] = h.named("lineTrace")[0];
+  same([start.x, start.y, start.z, end.x, end.y], [20, 2, 103, 20, 2]);
+  assert.ok(end.z < -10000, "deeper than the previous end");
+  assert.ok(covered(h, false), "the cover lifted on the deep hit, not on the ceiling");
+  assert.equal(h.named("animateTo").length, 1);
+});
+test("04.08: the client source does not know the spawn point, lookAt or the role", () => {
+  assert.equal(/lookAt|\.role|destination/.test(SOURCE.replace(/\/\/.*$/gm, "")), false);
+});
+
+// ---- CHG-07 (04.09, 04.10): no collision and no gravity while choosing -------------------------------------------------------
+const MOVE = ["suspendGravity", "setCollision", "resetFall", "restoreGravity"];
+const moveCalls = h => h.named(...MOVE).map(call => (call[0] === "setCollision" ? "setCollision(" + call[1] + ")" : call[0]));
+const RESTORE = ["resetFall", "setCollision(true)", "restoreGravity"];
+const indexOf = (h, name, arg) => h.calls.findIndex(call => call[0] === name && (arg === undefined || call[1] === arg));
+const coverLift = h => h.calls.findIndex(call => call[0] === "emit" && call[1] === "cover" && call[2].visible === false);
+
+test("04.09: open suspends gravity and turns collision off once, next to hiding the body", () => {
+  const h = harness(); h.open();
+  same(moveCalls(h), ["suspendGravity", "setCollision(false)"]);
+  assert.equal(h.named("setVisibility").length, 1);
+});
+test("04.09: with no pawn the calls are retried on the fixed schedule until they succeed, settled ones are not repeated", () => {
+  let tries = 0;
+  const h = harness({ visibility: () => ++tries > 2, movement: { setCollision: enable => (enable === false ? tries > 2 : true) } });
+  h.open();
+  assert.equal(h.named("setCollision").length, 1);
+  h.advance(250 * 3);
+  assert.equal(h.named("setCollision").length, 3, "retried until it answered true");
+  assert.equal(h.named("suspendGravity").length, 1, "gravity answers true at once and is not repeated");
+  h.advance(5000); assert.equal(h.named("setCollision").length, 3); assert.equal(h.timerCount, 0);
+});
+test("04.09: without a pawn forever, the retry stops at the limit with one warning and the page stays usable", () => {
+  const h = harness({ visibility: false, movement: { setCollision: () => false } }); h.open();
+  h.advance(250 * 60);
+  assert.equal(h.named("setCollision").length, 40);
+  assert.equal(h.logs.filter(line => line.includes("could not be set")).length, 1);
+  h.select("hogsmeade"); assert.equal(covered(h, true), true);
+});
+test("04.09: re-selects and a re-open do not suspend or switch collision off again", () => {
+  const h = harness({ trace: hit }); h.open(); h.select("hogsmeade"); h.advance(300); h.select("patio"); h.advance(300); h.handlers["ms-spawn:open"](OPEN);
+  same(moveCalls(h), ["suspendGravity", "setCollision(false)"]);
+});
+test("04.09: a throwing native is logged once, never blocks the open, is not retried, and the restore still runs in order", () => {
+  const h = harness({ movement: { suspendGravity: { throws: true }, setCollision: { throws: true } } });
+  h.open(); h.advance(5000);
+  assert.equal(h.named("suspendGravity").length, 1); assert.equal(h.named("setCollision").length, 1);
+  assert.equal(h.logs.filter(line => line.includes("suspendGravity failed")).length, 1);
+  assert.equal(h.named("createView").length, 1);
+  h.clear(); h.state({ status: "closed" });
+  same(moveCalls(h), ["resetFall", "setCollision(true)", "restoreGravity"]);
+});
+{
+  const exits = {
+    "a cancel (closed without applying)": h => h.state({ status: "closed" }),
+    "closed after a select, not applying": h => { h.select("hogsmeade"); h.state({ status: "closed" }); },
+    "resource stop": h => h.handlers.resourceStop("ms-spawn"),
+  };
+  for (const [name, exit] of Object.entries(exits)) {
+    test("04.09: " + name + " restores movement in order, before camera and body, once", () => {
+      const h = harness({ trace: hit }); h.open(); h.select("hogsmeade"); h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "done" }); h.advance(300); h.clear();
+      exit(h);
+      same(moveCalls(h), RESTORE);
+      assert.ok(indexOf(h, "resetFall") < indexOf(h, "restore"), "movement before camera");
+      assert.ok(indexOf(h, "resetFall") < indexOf(h, "setVisibility", true), "movement before body");
+      h.state({ status: "closed" }); h.handlers.resourceStop("ms-spawn");
+      same(moveCalls(h), RESTORE);
+    });
+  }
+}
+test("04.09: an emergency teardown restores movement before camera and body and sends abandon", () => {
+  const h = harness({ trace: hit }); h.open(); arrivedAt(h, "hogsmeade"); h.clear();
+  h.handlers["ms-spawn:state"]({ status: "choosing", selectedId: "hogsmeade", get notice() { throw new Error("boom"); } });
+  same(moveCalls(h), RESTORE);
+  assert.ok(indexOf(h, "resetFall") < indexOf(h, "restore"));
+  assert.ok(indexOf(h, "resetFall") < indexOf(h, "setVisibility", true));
+  assert.equal(h.server("ms-spawn:abandon").length, 1);
+});
+test("04.09: the 5 s unanswered-confirm guard restores in order; a later exit adds nothing", () => {
+  const h = harness({ trace: hit }); h.open(); arrivedAt(h, "hogsmeade"); h.clear();
+  h.viewHandlers.confirm({ id: "hogsmeade" }); assert.equal(moveCalls(h).length, 0, "not at the click");
+  h.advance(5000);
+  same(moveCalls(h), RESTORE);
+  h.handlers.resourceStop("ms-spawn"); same(moveCalls(h), RESTORE);
+});
+test("04.09: the 60 s apply ceiling restores in order before the cover lifts", () => {
+  const h = harness({ trace: () => null }); h.open(); arrivedAt(h, "hogsmeade");
+  h.viewHandlers.confirm({ id: "hogsmeade" }); h.state({ status: "applying", selectedId: "hogsmeade" }); h.clear();
+  h.advance(60000);
+  same(moveCalls(h), RESTORE);
+  assert.ok(coverLift(h) > indexOf(h, "restoreGravity"));
+  h.handlers.resourceStop("ms-spawn"); same(moveCalls(h), RESTORE);
+});
+test("04.09: throwing restore calls do not skip the rest, nor the camera, body or page", () => {
+  const h = harness({ trace: hit, movement: { resetFall: { throws: true } } }); h.open(); arrivedAt(h, "hogsmeade"); h.clear();
+  h.handlers.resourceStop("ms-spawn");
+  same(moveCalls(h), RESTORE);
+  assert.equal(h.named("restore").length, 1); assert.equal(h.named("setVisibility").length, 1); assert.equal(h.named("destroyView").length, 1);
+});
+// SEC-17: a throwing Web.emit (the cover lift) must not skip any restore
+for (const [name, exit] of [["normal closed", h => h.state({ status: "closed" })], ["resource stop", h => h.handlers.resourceStop("ms-spawn")]]) {
+  test("SEC-17: Web.emit throwing during teardown (" + name + ") still restores movement, camera and body once", () => {
+    const h = harness({ trace: () => null }); h.open(); h.select("hogsmeade"); h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "done" });
+    assert.equal(covered(h, true), true, "a cover is up");
+    h.clear(); h.breakWeb();
+    exit(h);
+    same(moveCalls(h), RESTORE);
+    assert.equal(h.named("restore").length, 1); assert.equal(h.named("setVisibility").filter(call => call[1] === true).length, 1);
+    assert.equal(h.named("destroyView").length, 1);
+    h.state({ status: "closed" }); h.handlers.resourceStop("ms-spawn");
+    same(moveCalls(h), RESTORE);
+  });
+}
+test("SEC-17: Web.emit throwing in an emergency teardown still restores movement, camera and body once", () => {
+  const h = harness({ trace: () => null }); h.open(); h.select("hogsmeade");
+  assert.equal(covered(h, true), true);
+  h.clear(); h.breakWeb();
+  h.handlers["ms-spawn:state"]({ status: "choosing", selectedId: "hogsmeade", get notice() { throw new Error("boom"); } });
+  same(moveCalls(h), RESTORE);
+  assert.equal(h.named("restore").length, 1); assert.equal(h.named("setVisibility").filter(call => call[1] === true).length, 1);
+  assert.equal(h.server("ms-spawn:abandon").length, 1);
+});
+test("04.09: nothing about movement or collision is sent to the server or the page", () => {
+  const h = harness({ trace: hit }); h.open(); arrivedAt(h, "hogsmeade"); h.viewHandlers.confirm({ id: "hogsmeade" });
+  const text = JSON.stringify(h.calls.filter(call => call[0] === "emitServer" || call[0] === "emit"));
+  assert.equal(/collision|gravity|resetFall|movement/i.test(text), false);
+});
+
+test("04.10: no restore at the click nor while the server applies; it comes after closed and the final world, before the cover lifts", () => {
+  let ground = true;
+  const h = harness({ trace: () => (ground ? hit() : null) }); h.open(); arrivedAt(h, "hogsmeade"); h.clear(); ground = false;
+  h.viewHandlers.confirm({ id: "hogsmeade" }); assert.equal(moveCalls(h).length, 0);
+  h.state({ status: "applying", selectedId: "hogsmeade" }); assert.equal(moveCalls(h).length, 0);
+  h.advance(10000); assert.equal(moveCalls(h).length, 0, "still applying");
+  h.state({ status: "closed" });
+  assert.equal(moveCalls(h).length, 0, "closed alone: the final world is not loaded yet");
+  h.advance(300); assert.equal(moveCalls(h).length, 0); ground = true;
+  h.advance(300);
+  same(moveCalls(h), RESTORE);
+  assert.ok(coverLift(h) > indexOf(h, "restoreGravity"), "restored with the cover still opaque");
+  assert.equal(indexOf(h, "setVisibility", true), -1, "body not shown yet");
+  assert.equal(h.named("restore").length, 0, "camera not restored yet");
+  h.advance(300);
+  assert.ok(indexOf(h, "setVisibility", true) > coverLift(h));
+  same(moveCalls(h), RESTORE);
+  h.handlers.resourceStop("ms-spawn"); same(moveCalls(h), RESTORE);
+});
+test("04.10: the ceiling in the final wait restores anyway, before the fade, with no notice", () => {
+  const h = harness({ trace: () => null }); h.open(); h.select("hogsmeade"); h.state({ status: "choosing", selectedId: "hogsmeade", teleport: "done" });
+  h.advance(4000); land(h);
+  h.viewHandlers.confirm({ id: "hogsmeade" }); h.state({ status: "applying", selectedId: "hogsmeade" }); h.state({ status: "closed" }); h.clear();
+  h.advance(3700); assert.equal(moveCalls(h).length, 0);
+  h.advance(500); same(moveCalls(h), RESTORE);
+  assert.equal(h.toPage("notice").length, 0);
+});
+test("04.10: a throwing lineTrace in the final wait is caught; the restore comes by the ceiling, before the cover lifts", () => {
+  let armed = false;
+  const h = harness({ trace: () => { if (armed) throw new Error("boom"); return hit(); } }); h.open(); arrivedAt(h, "hogsmeade");
+  h.viewHandlers.confirm({ id: "hogsmeade" }); h.state({ status: "applying", selectedId: "hogsmeade" }); armed = true; h.state({ status: "closed" }); h.clear();
+  h.advance(3000); assert.equal(moveCalls(h).length, 0);
+  h.advance(1500); same(moveCalls(h), RESTORE);
+  assert.ok(coverLift(h) > indexOf(h, "restoreGravity"));
+});
+test("04.10: a server rejection after confirm keeps collision and gravity as they were and the view usable", () => {
+  const h = harness({ trace: hit }); h.open(); arrivedAt(h, "hogsmeade"); h.clear();
+  h.viewHandlers.confirm({ id: "hogsmeade" });
+  h.state({ status: "choosing", selectedId: "hogsmeade", notice: "Ainda não" });
+  assert.equal(moveCalls(h).length, 0);
+  h.advance(6000); assert.equal(moveCalls(h).length, 0, "the 5 s guard was cancelled by the answer");
+  h.select("patio"); assert.equal(covered(h, true), true);
+  assert.equal(moveCalls(h).length, 0);
 });

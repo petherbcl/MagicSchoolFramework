@@ -3,7 +3,7 @@
 const { SpawnError, check, clone, locationId, position, roles: rolesOf } = require("./validation");
 const { RESERVED_ID } = require("./config");
 
-const VERSION = "0.4.0";
+const VERSION = "0.5.2";
 const CANCEL_REASONS = Object.freeze(["NOT_READY", "NO_OPTIONS", "INTERNAL_ERROR", "STOPPED", "CLIENT_TIMEOUT", "CLIENT_ABORTED"]);
 // Per-player ingress token bucket shared by every client event (SEC-01): a burst of 10, refilled at 10 per second.
 const BUCKET_SIZE = 10, BUCKET_REFILL_PER_MS = 10 / 1000;
@@ -15,20 +15,47 @@ const FLIGHT_TOLERANCE_MS = 250;
 const HOLD_RENEW_MS = 10 * 60 * 1000;
 const round = value => Math.round(value * 100) / 100;
 
-// Flight-target pose (CameraView shape) derived from a spawn point: `distance` cm behind it (opposite to its yaw),
-// `height` cm above it, looking at it. Pure and deterministic. Unreal axes: yaw 0 faces +X, positive pitch looks up.
+// The one pitch/yaw rule: rotation (CameraView shape) of a camera at `from` looking at `to`. Unreal axes: yaw 0 faces +X,
+// positive pitch looks up. Pure, deterministic and always finite (a camera straight above its target gets yaw 0).
+function rotationToward(from, to) {
+  const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+  return { pitch: round(Math.atan2(dz, Math.hypot(dx, dy)) * 180 / Math.PI), yaw: round(Math.atan2(dy, dx) * 180 / Math.PI), roll: 0 };
+}
+
+// Flight-target pose for the "last" entry only (CHG-05): `distance` cm behind the stored position (opposite to its yaw),
+// `height` cm above it, looking at it. MS_SPAWN_CAMERA_DISTANCE/HEIGHT feed only this function now.
 function cameraPose(point, { distance, height }) {
   const yaw = point.yaw * Math.PI / 180;
-  return {
-    position: { x: round(point.x - Math.cos(yaw) * distance), y: round(point.y - Math.sin(yaw) * distance), z: round(point.z + height) },
-    rotation: { pitch: round(-Math.atan2(height, distance) * 180 / Math.PI), yaw: round(point.yaw), roll: 0 },
-  };
+  const at = { x: point.x - Math.cos(yaw) * distance, y: point.y - Math.sin(yaw) * distance, z: point.z + height };
+  return { position: { x: round(at.x), y: round(at.y), z: round(at.z) }, rotation: rotationToward(at, point) };
 }
 
 // CHG-02 (G13): pose the swoop starts from, under the cover: the target pose with an extra `departureDistance` behind and
 // `departureHeight` above (same look-at-the-point rule), so the reveal is an aerial move. Derived here, never by the client.
 function departurePose(point, camera) {
   return cameraPose(point, { distance: camera.distance + (camera.departureDistance ?? 0), height: camera.height + (camera.departureHeight ?? 0) });
+}
+
+// CHG-05: pose of a configured location: the camera sits at `location.camera` and looks at its lookAt (config.js always
+// resolves it, default the spawn point). It is used only to compute the rotation and is never sent.
+function locationPose(location) {
+  const { x, y, z, lookAt, yaw, pitch } = location.camera;
+  // CHG-06: yaw mode, the configured rotation as is (roll 0); no lookAt exists.
+  if (!lookAt) return { position: { x, y, z }, rotation: { pitch, yaw, roll: 0 } };
+  return { position: { x, y, z }, rotation: rotationToward({ x, y, z }, lookAt) };
+}
+// CHG-05: departure keeps its CHG-02 meaning: an extra `departureDistance` outward (horizontally, away from the look-at point,
+// along the same line of sight) and `departureHeight` above the camera, still looking at the look-at point.
+function locationDeparture(location, camera) {
+  const { x, y, z, lookAt, yaw, pitch } = location.camera;
+  if (!lookAt) { // CHG-06 (G31): back off along the horizontal opposite of the facing direction (yaw only), same rotation
+    const rad = yaw * Math.PI / 180, extra = camera.departureDistance ?? 0, rise = camera.departureHeight ?? 0;
+    return { position: { x: round(x - Math.cos(rad) * extra), y: round(y - Math.sin(rad) * extra), z: round(z + rise) }, rotation: { pitch, yaw, roll: 0 } };
+  }
+  const hx = x - lookAt.x, hy = y - lookAt.y, horizontal = Math.hypot(hx, hy);
+  const extra = camera.departureDistance ?? 0, rise = camera.departureHeight ?? 0;
+  const at = horizontal > 0 ? { x: x + hx / horizontal * extra, y: y + hy / horizontal * extra, z: z + rise } : { x, y, z: z + rise };
+  return { position: { x: round(at.x), y: round(at.y), z: round(at.z) }, rotation: rotationToward(at, lookAt) };
 }
 
 // Spawn selection state machine. Dependencies are injected so tests replace them:
@@ -80,15 +107,22 @@ function createSpawn({ config, game, core, emit = () => {}, logger = console, cl
   function throttle(s) { check(clock() - s.lastActionAt >= config.actionGapMs, "RATE_LIMITED"); s.lastActionAt = clock(); }
 
   // The offered list of one player: "last" first (only when ms-character handed one over), then the configuration.
-  // `destination` is server-side only; the client receives the id, the name and the derived camera pose.
+  // `destination` (what ms-spawn:spawnSelected carries) and `preview` (where the invisible player is teleported and held while
+  // the player looks around) are server-side only. CHG-05: for a configured location `preview` is its camera position (with the
+  // spawn point's yaw, G22) and `destination` stays the spawn point; for `last` both are the stored position.
+  // The client receives the id, the name, the kind, the derived camera pose and (configured only) the icon file name.
   // CHG-04: a configured location is offered only when it has no role or its role is among the character's roles (case-sensitive).
   // `last` is never restricted. A restricted location is simply absent: its id, name and camera pose are never exposed.
   function offer(last, roles) {
     const entries = [];
-    if (last) entries.push({ id: RESERVED_ID, name: "Última localização", kind: "last", destination: last });
+    if (last) entries.push({ id: RESERVED_ID, name: "Última localização", kind: "last", destination: last, preview: last,
+      camera: { ...cameraPose(last, config.camera), departure: departurePose(last, config.camera) } });
     for (const location of config.locations) {
       if (location.role && !roles.has(location.role)) continue;
-      entries.push({ id: location.id, name: location.name, kind: "config", destination: { x: location.x, y: location.y, z: location.z, yaw: location.yaw } });
+      const { x, y, z } = location.camera;
+      entries.push({ id: location.id, name: location.name, kind: "config", destination: { x: location.x, y: location.y, z: location.z, yaw: location.yaw },
+        preview: { x, y, z, yaw: location.yaw }, camera: { ...locationPose(location), departure: locationDeparture(location, config.camera) },
+        ...(location.icon ? { icon: location.icon } : {}) });
     }
     return entries;
   }
@@ -129,7 +163,7 @@ function createSpawn({ config, game, core, emit = () => {}, logger = console, cl
         s.holding = true; s.unheldSince = null; s.heldAt = clock();
       }
       game.open(playerId, {
-        locations: offered.map(({ id, name, kind, destination }) => ({ id, name, kind, camera: { ...cameraPose(destination, config.camera), departure: departurePose(destination, config.camera) } })),
+        locations: offered.map(({ id, name, kind, camera, icon }) => ({ id, name, kind, camera, ...(icon ? { icon } : {}) })),
         flight: { durationMs: config.camera.durationMs, easing: config.camera.easing },
         areaTimeoutMs: config.areaTimeoutMs,
         timingLog: config.timingLog === true, // CHG-03: only tells the client script to console.log its timing line
@@ -171,7 +205,7 @@ function createSpawn({ config, game, core, emit = () => {}, logger = console, cl
     s.move = { id, token, status: "pending" };
     s.moves += 1;
     if (s.queued) { timers.clearTimeout(s.queued); s.queued = null; }
-    const point = s.offered.get(id).destination;
+    const point = s.offered.get(id).preview; // CHG-05: the camera position for configured locations, never the client's input
     const launch = () => { s.lastMoveAt = clock(); move(s, token, point, id).catch(() => logger.error("[ms-spawn] move failed unexpectedly")); };
     const wait = s.lastMoveAt + config.moveGapMs - clock();
     if (wait <= 0) { launch(); return; }
@@ -355,4 +389,4 @@ function createSpawn({ config, game, core, emit = () => {}, logger = console, cl
     guard(id) { const s = selections.get(id); return () => Boolean(s && selections.get(id) === s); } };
 }
 
-module.exports = { createSpawn, cameraPose, departurePose, CANCEL_REASONS, VERSION, SpawnError };
+module.exports = { createSpawn, cameraPose, departurePose, locationPose, locationDeparture, rotationToward, CANCEL_REASONS, VERSION, SpawnError };

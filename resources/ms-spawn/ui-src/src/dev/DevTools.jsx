@@ -7,7 +7,7 @@ import "./dev.css";
 // docs/design/mockups/spawn.html. Reaches every screen state of handoff §3.1 through the mocked server in bridge.js.
 // Hash shortcuts as in the mockup (CHG-02): #cover-choosing (long cover over the choice), #cover-confirm (cover over the
 // confirmation), #cover-fail (preparation failure), #cover-rapid (three selects 250 ms apart), plus #transit (flying),
-// #arrived, #error, #empty, #lost. #loading-area = #cover-choosing and #applying = #cover-confirm, as in the mockup.
+// #arrived, #error, #empty, #lost, and (CHG-05) #icon-missing, #icons-off, #icons-many. #loading-area = #cover-choosing and #applying = #cover-confirm, as in the mockup.
 const TOGGLES = [
   ["last", "Última localização"],
   ["many", "12 locais"],
@@ -15,6 +15,8 @@ const TOGGLES = [
   ["fail", "Falha ao preparar"],
   ["reject", "Servidor rejeita"],
   ["empty", "Sem locais"],
+  ["icons", "Ícones com imagem"],
+  ["missing", "Imagem em falta"],
 ];
 
 function Toolbar({ startLost }) {
@@ -24,7 +26,7 @@ function Toolbar({ startLost }) {
     mockFlags[key] = !mockFlags[key];
     setFlags({ ...mockFlags });
     setLost(false);
-    if (key === "last" || key === "many" || key === "empty") mockOpen(); // the location list changes: a new "open"
+    if (["last", "many", "empty", "icons", "missing"].includes(key)) mockOpen(); // the location list changes: a new "open"
   };
   const toggleLost = () => {
     if (lost) { setLost(false); mockOpen(); } else { setLost(true); mockLose(); }
@@ -62,6 +64,10 @@ export default function mountDevTools() {
   if (hash === "cover-choosing" || hash === "loading-area") mockFlags.slow = true;
   if (hash === "cover-fail") mockFlags.fail = true;
   if (hash === "error") mockFlags.reject = true;
+  // CHG-05 icon review: #icon-missing (every image points at a missing file), #icons-off (all pins), #icons-many (12 locations).
+  if (hash === "icon-missing") mockFlags.missing = true;
+  if (hash === "icons-off") mockFlags.icons = false;
+  if (hash === "icons-many") mockFlags.many = true;
 
   const world = document.createElement("div");
   world.className = "dev-world";

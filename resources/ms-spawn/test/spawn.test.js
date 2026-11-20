@@ -10,7 +10,7 @@ const LOCATIONS = [
 ];
 function fixture(t, { locations = LOCATIONS, settings = {} } = {}) {
   let now = 1000000;
-  const config = loadConfig({ MS_SPAWN_LOCATIONS: JSON.stringify(locations) }, { envFile: null });
+  const config = loadConfig({ MS_SPAWN_LOCATIONS: JSON.stringify(locations.map(withCamera)) }, { envFile: null });
   const sessions = new Map(), events = [], opened = [], states = [];
   const core = { Users: { get: id => sessions.get(id) || null, isReady: id => sessions.get(id)?.ready === true } };
   // Fake native player: ownership of holds is modelled so tests can prove the player is never unheld by a takeover.
@@ -40,6 +40,9 @@ function fixture(t, { locations = LOCATIONS, settings = {} } = {}) {
   const settle = () => new Promise(resolve => setImmediate(resolve));
   return { spawn, sessions, events, opened, states, join, req, names, lastState, advance, settle, config, native };
 }
+// CHG-05: every configured location needs a camera. The default test camera is 100/200/30 cm away from the spawn point so a test
+// can tell the camera position (preview target) from the spawn point (confirm destination).
+const withCamera = l => (l.camera ? l : { ...l, camera: { x: l.x + 100, y: l.y + 200, z: l.z + 30 } });
 const LAST = { x: 11, y: 22, z: 33, yaw: 44 };
 const reject = (fn, code, f) => { if (f) f.advance(500); assert.throws(fn, { name: "SpawnError", code }); };
 // select + arrival + gap, ready to confirm
@@ -232,7 +235,7 @@ test("a new request replaces the previous selection of the same player silently"
 test("the Spawn export is frozen, ready after start, and lists id/name only", async t => {
   const f = fixture(t);
   assert.equal(Object.isFrozen(f.spawn.api), true);
-  assert.equal(f.spawn.api.isReady(), true); assert.equal(f.spawn.api.version, "0.4.0");
+  assert.equal(f.spawn.api.isReady(), true); assert.equal(f.spawn.api.version, "0.5.2");
   const list = f.spawn.api.locations();
   assert.deepEqual(list, [{ id: "hogsmeade", name: "Hogsmeade" }, { id: "patio-de-hogwarts", name: "Pátio de Hogwarts" }]);
   assert.ok(Object.isFrozen(list) && Object.isFrozen(list[0]));
@@ -435,4 +438,105 @@ test("SEC-15: a replacing request that ends in NO_OPTIONS tells the old page it 
   assert.equal(f.req(1, null, { roles: [] }), false);
   assert.deepEqual(f.lastState(1), { status: "closed" });
   assert.equal(f.events.at(-1).payload.reason, "NO_OPTIONS");
+});
+
+// ---- CHG-05 (STORY-02.15, 02.17): pose from camera/lookAt, icon in the open payload -------------------------------------------
+const { locationPose, locationDeparture, rotationToward } = require("../server/spawn");
+const round2 = v => Math.round(v * 100) / 100;
+const cfg = (...locations) => loadConfig({ MS_SPAWN_LOCATIONS: JSON.stringify(locations) }, { envFile: null }).locations;
+
+test("02.15: the camera position is the configured camera and the rotation points at lookAt (default: the spawn point)", () => {
+  const [a, b] = cfg(
+    { name: "A", x: 1000, y: 0, z: 0, yaw: 33, camera: { x: 0, y: 0, z: 0 } },
+    { name: "B", x: 1000, y: 0, z: 0, yaw: 33, camera: { x: 100, y: 200, z: 300, lookAt: { x: 100, y: 1200, z: 300 } } });
+  assert.deepEqual(locationPose(a), { position: { x: 0, y: 0, z: 0 }, rotation: { pitch: 0, yaw: 0, roll: 0 } }); // looks at the spawn point (+X)
+  assert.deepEqual(locationPose(b), { position: { x: 100, y: 200, z: 300 }, rotation: { pitch: 0, yaw: 90, roll: 0 } }); // looks at lookAt (+Y), not the spawn point
+  const up = locationPose(cfg({ name: "C", x: 0, y: 0, z: 0, yaw: 0, camera: { x: 100, y: 0, z: 100, lookAt: { x: 200, y: 0, z: 0 } } })[0]);
+  assert.deepEqual(up.rotation, { pitch: round2(-Math.atan2(100, 100) * 180 / Math.PI), yaw: 0, roll: 0 });
+});
+test("02.15: one shared pitch/yaw rule: the old derivation and the new one agree for a camera placed behind and above the point", () => {
+  for (const point of [{ x: 359573, y: -451727.25, z: -85308.25, yaw: -146.48 }, { x: 1000, y: 2000, z: 300, yaw: 90 }, { x: 0, y: 0, z: 0, yaw: 10.53 }]) {
+    const old = cameraPose(point, { distance: 1200, height: 600 });
+    const [migrated] = cfg({ name: "M", ...point, camera: old.position });
+    const pose = locationPose(migrated);
+    assert.deepEqual(pose.position, old.position);
+    assert.ok(Math.abs(pose.rotation.pitch - old.rotation.pitch) <= 0.011 && Math.abs(pose.rotation.yaw - old.rotation.yaw) <= 0.011, JSON.stringify(point));
+  }
+  assert.deepEqual(rotationToward({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -5 }).yaw, 0); // straight below: finite
+});
+test("02.15: departure keeps its meaning: equal to the camera with 0/0 extras, farther and higher along the same line of sight otherwise", () => {
+  const [a] = cfg({ name: "A", x: 0, y: 0, z: 0, yaw: 0, camera: { x: 300, y: 400, z: 50, lookAt: { x: 0, y: 0, z: 50 } } });
+  assert.deepEqual(locationDeparture(a, { departureDistance: 0, departureHeight: 0 }), locationPose(a));
+  const far = locationDeparture(a, { departureDistance: 500, departureHeight: 1000 });
+  assert.deepEqual(far.position, { x: 600, y: 800, z: 1050 }); // 500 cm farther along the horizontal ray (3,4,5 triangle), 1000 higher
+  assert.deepEqual(far.rotation, rotationToward({ x: 600, y: 800, z: 1050 }, { x: 0, y: 0, z: 50 }));
+  // A camera straight above its look-at point has no horizontal ray: it only rises.
+  const [above] = cfg({ name: "B", x: 0, y: 0, z: 0, yaw: 0, camera: { x: 0, y: 0, z: 500 } });
+  assert.deepEqual(locationDeparture(above, { departureDistance: 700, departureHeight: 100 }).position, { x: 0, y: 0, z: 600 });
+});
+test("02.15: MS_SPAWN_CAMERA_DISTANCE/HEIGHT do not change a configured pose but still shape last; poses are deterministic and finite", async t => {
+  const a = fixture(t, { settings: { camera: { ...loadConfig({}, { envFile: null }).camera, distance: 500, height: 100 } } });
+  const b = fixture(t);
+  a.join(); b.join(); a.req(1, LAST); b.req(1, LAST);
+  const [lastA, ...restA] = a.opened[0].payload.locations, [lastB, ...restB] = b.opened[0].payload.locations;
+  assert.deepEqual(restA, restB);
+  assert.notDeepEqual(lastA.camera, lastB.camera);
+  assert.deepEqual(lastB.camera, { ...cameraPose(LAST, b.config.camera), departure: departurePose(LAST, b.config.camera) });
+  const c = fixture(t); c.join(); c.req(1, LAST);
+  assert.deepEqual(c.opened[0].payload, b.opened[0].payload);
+  for (const l of b.opened[0].payload.locations) for (const v of [...Object.values(l.camera.position), ...Object.values(l.camera.rotation), ...Object.values(l.camera.departure.position)]) assert.ok(Number.isFinite(v));
+});
+test("02.15: the configured camera reaches the open payload as position (no spawn point), looking at the lookAt", async t => {
+  const f = fixture(t, { locations: [{ name: "Vista", x: 10, y: 20, z: 30, yaw: 5, camera: { x: 510, y: 20, z: 30, lookAt: { x: 10, y: 20, z: 30 } } }] });
+  f.join(); f.req(1);
+  const [l] = f.opened[0].payload.locations;
+  assert.deepEqual(l.camera.position, { x: 510, y: 20, z: 30 });
+  assert.deepEqual(l.camera.rotation, { pitch: 0, yaw: 180, roll: 0 });
+  assert.deepEqual(l.camera.departure.position, { x: 510 + 3000, y: 20, z: 30 + 1500 }); // default departure extras 3000 / 1500
+});
+test("02.17: icon is sent as a file name for configured locations that have one, never for last, and omitted otherwise", async t => {
+  const f = fixture(t, { locations: [{ name: "Com Icone", x: 1, y: 2, z: 3, yaw: 4, icon: "hogsmeade.webp" }, { name: "Sem Icone", x: 5, y: 6, z: 7, yaw: 8 }] });
+  f.join(); f.req(1, LAST);
+  const [last, withIcon, without] = f.opened[0].payload.locations;
+  assert.equal("icon" in last, false);
+  assert.equal(withIcon.icon, "hogsmeade.webp");
+  assert.equal("icon" in without, false);
+  assert.deepEqual(Object.keys(withIcon).sort(), ["camera", "icon", "id", "kind", "name"]);
+  assert.deepEqual(Object.keys(without).sort(), ["camera", "id", "kind", "name"]);
+});
+test("02.17: the payload never carries the spawn point, lookAt or role; other channels carry no icon or camera", async t => {
+  const f = fixture(t, { locations: [{ name: "Secreta", x: 111111, y: 222222, z: 333333, yaw: 44.5, role: "mago", icon: "a.png", camera: { x: 1, y: 2, z: 3, lookAt: { x: 555555, y: 666666, z: 777777 } } }] });
+  f.join(); f.req(1, null, { roles: ["mago"] });
+  const text = JSON.stringify(f.opened[0].payload);
+  for (const hidden of ["111111", "222222", "333333", "44.5", "555555", "666666", "777777", "lookAt", "role", "mago", "destination"]) assert.equal(text.includes(hidden), false, hidden);
+  assert.deepEqual(f.spawn.api.locations(), [{ id: "secreta", name: "Secreta" }]);
+  assert.equal(/icon|camera|lookAt/.test(JSON.stringify(f.states)), false);
+  // A character without the role is not offered the location: its icon and pose are not exposed either.
+  const g = fixture(t, { locations: [{ name: "Secreta", x: 1, y: 2, z: 3, yaw: 4, role: "mago", icon: "a.png" }, { name: "Aberta", x: 5, y: 6, z: 7, yaw: 8 }] });
+  g.join(); g.req(1);
+  assert.equal(JSON.stringify(g.opened[0].payload).includes("a.png"), false);
+  assert.deepEqual(g.opened[0].payload.locations.map(l => l.id), ["aberta"]);
+});
+
+// ---- CHG-06 (STORY-02.18): pose and departure in yaw mode ------------------------------------------------------------------------
+test("02.18: yaw mode pose is the configured rotation with roll 0 (default pitch 0), position unchanged", () => {
+  const [a, b] = cfg({ name: "A", x: 0, y: 0, z: 0, yaw: 77, camera: { x: 100, y: 200, z: 300, yaw: 90 } }, { name: "B", x: 0, y: 0, z: 0, yaw: 77, camera: { x: 1, y: 2, z: 3, yaw: -360, pitch: -30.5 } });
+  assert.deepEqual(locationPose(a), { position: { x: 100, y: 200, z: 300 }, rotation: { pitch: 0, yaw: 90, roll: 0 } });
+  assert.deepEqual(locationPose(b), { position: { x: 1, y: 2, z: 3 }, rotation: { pitch: -30.5, yaw: -360, roll: 0 } });
+});
+test("02.18: yaw mode departure goes back along the horizontal opposite of the facing (pitch ignored, G31), up by departureHeight, same rotation", () => {
+  const [a, b] = cfg({ name: "A", x: 0, y: 0, z: 0, yaw: 0, camera: { x: 1000, y: 2000, z: 50, yaw: 0, pitch: 45 } }, { name: "B", x: 0, y: 0, z: 0, yaw: 0, camera: { x: 1000, y: 2000, z: 50, yaw: 90 } });
+  assert.deepEqual(locationDeparture(a, { departureDistance: 500, departureHeight: 1000 }), { position: { x: 500, y: 2000, z: 1050 }, rotation: { pitch: 45, yaw: 0, roll: 0 } });
+  assert.deepEqual(locationDeparture(b, { departureDistance: 500, departureHeight: 0 }), { position: { x: 1000, y: 1500, z: 50 }, rotation: { pitch: 0, yaw: 90, roll: 0 } });
+  assert.deepEqual(locationDeparture(a, { departureDistance: 0, departureHeight: 0 }), locationPose(a));
+});
+test("02.18: lookAt and default modes are unchanged next to a yaw location; the open payload keeps its shape and hides yaw/pitch config", async t => {
+  const f = fixture(t, { locations: [{ name: "Yaw", x: 10, y: 20, z: 30, yaw: 5, camera: { x: 510, y: 20, z: 30, yaw: 180, pitch: 10 } }, { name: "Look", x: 10, y: 20, z: 30, yaw: 5, camera: { x: 510, y: 20, z: 30 } }] });
+  f.join(); f.req(1);
+  const [y, l] = f.opened[0].payload.locations.filter(item => item.kind === "config");
+  assert.deepEqual(y.camera.position, { x: 510, y: 20, z: 30 });
+  assert.deepEqual(y.camera.rotation, { pitch: 10, yaw: 180, roll: 0 });
+  assert.deepEqual(l.camera.rotation, { pitch: 0, yaw: 180, roll: 0 });
+  assert.deepEqual(Object.keys(y.camera).sort(), ["departure", "position", "rotation"]);
+  assert.deepEqual(Object.keys(y), Object.keys(l));
 });

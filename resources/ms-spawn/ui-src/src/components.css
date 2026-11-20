@@ -256,7 +256,8 @@
 
 .spawn-item {
   position: relative; width: 100%; min-height: 3.5rem;
-  display: grid; grid-template-columns: auto 1fr 1.5rem; align-items: center; gap: var(--space-4);
+  --spawn-icon-size: 2.25rem; /* CHG-05: fixed icon slot (36 px), same for pin, star and image; local on purpose, not a global token */
+  display: grid; grid-template-columns: var(--spawn-icon-size) 1fr 1.5rem; align-items: center; gap: var(--space-3);
   padding: 0 var(--space-4) 0 var(--space-5);
   background: linear-gradient(180deg, var(--color-bg-surface), #101B24);
   border: 1px solid rgba(133, 113, 80, 0.75); border-radius: var(--radius-md);
@@ -269,7 +270,27 @@
   box-shadow: var(--shadow-glow); opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-smooth);
 }
-.spawn-item__icon { width: 1.375rem; height: 1.375rem; color: var(--color-text-secondary); transition: color var(--duration-fast) var(--ease-smooth); }
+/* CHG-05 icon slot (handoff §10): the 22 px pin / star is centred in it and is ALWAYS rendered; the optional image fills
+   the slot above it (opacity 0 until loaded) and the ring is drawn over the image. Only opacity and border-color transition. */
+.spawn-item__media { position: relative; display: block; width: var(--spawn-icon-size); height: var(--spawn-icon-size); }
+.spawn-item__icon {
+  position: absolute; inset: 0; margin: auto; width: 1.375rem; height: 1.375rem; color: var(--color-text-secondary);
+  transition: color var(--duration-fast) var(--ease-smooth), opacity var(--duration-fast) var(--ease-smooth);
+}
+.spawn-item__img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center;
+  border-radius: var(--radius-md); opacity: 0; pointer-events: none; user-select: none;
+  transition: opacity var(--duration-fast) var(--ease-smooth);
+}
+/* Ring over the image: 1 px brass border; the dark inner line and the soft inner shadow are the arbitrary-value utility
+   on the element (static, compiled into the CSS file, no inline style). */
+.spawn-item__ring {
+  position: absolute; inset: 0; border-radius: var(--radius-md); pointer-events: none; opacity: 0;
+  border: 1px solid var(--color-brass);
+  transition: border-color var(--duration-fast) var(--ease-smooth), opacity var(--duration-fast) var(--ease-smooth);
+}
+.spawn-item__media[data-img="ok"] .spawn-item__img, .spawn-item__media[data-img="ok"] .spawn-item__ring { opacity: 1; }
+.spawn-item__media[data-img="ok"] .spawn-item__icon { opacity: 0; }
 .spawn-item__name {
   font: var(--font-weight-semibold) var(--font-size-lg) / 1.2 var(--font-family-display);
   letter-spacing: 0.04em; overflow-wrap: anywhere;
@@ -293,12 +314,14 @@
 .spawn-item:hover:not(:disabled) { border-color: var(--color-accent-primary); transform: translateY(var(--hover-lift)); }
 .spawn-item:hover:not(:disabled)::after { opacity: 0.6; }
 .spawn-item:hover:not(:disabled) .spawn-item__icon { color: var(--color-accent-primary-hover); }
+.spawn-item:hover:not(:disabled) .spawn-item__ring { border-color: var(--color-accent-primary); }
 .spawn-item:active:not(:disabled) { transform: scale(0.99); }
 .spawn-item:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
 /* Selected: cyan border + glow + check (arrived) or spinner + line (flying). Never colour alone. */
 .spawn-item[aria-pressed="true"], .spawn-item[aria-pressed="true"]:hover:not(:disabled) { border-color: var(--color-info); }
 .spawn-item[aria-pressed="true"]::after, .spawn-item[aria-pressed="true"]:hover:not(:disabled)::after { box-shadow: var(--shadow-glow-arcane); opacity: 1; }
 .spawn-item[aria-pressed="true"] .spawn-item__icon, .spawn-item[aria-pressed="true"]:hover:not(:disabled) .spawn-item__icon { color: var(--color-info); }
+.spawn-item[aria-pressed="true"] .spawn-item__ring, .spawn-item[aria-pressed="true"]:hover:not(:disabled) .spawn-item__ring { border-color: var(--color-info); } /* after the hover rule: selected stays cyan */
 .spawn-item[aria-pressed="true"] .spawn-item__check { opacity: 1; }
 .spawn-item.is-flying .spawn-item__check { opacity: 0; }
 .spawn-item.is-flying .spawn-item__spin { opacity: 1; }
@@ -351,11 +374,13 @@
   .panel { padding-top: var(--space-5); padding-bottom: var(--space-4); }
   .panel-title { font-size: 1.625rem; }
   .cta { min-height: 3.75rem; }
-  .spawn-item { min-height: 3rem; }
+  .spawn-item { min-height: 3rem; --spawn-icon-size: 2rem; } /* 32 px image in the 48 px item (8 px margin) */
   .spawn-list { gap: var(--space-2); }
 }
 @media (prefers-reduced-motion: reduce) {
   .spawn-item:hover:not(:disabled) { transform: none; }
+  /* The pin <-> image swap becomes instant. */
+  .spawn-item__img, .spawn-item__icon, .spawn-item__ring { transition: none; }
 }
 
 /* ---- CHG-02: total opaque cover (STORY-05.07, handoff §9.4) -------------------------------------------------------

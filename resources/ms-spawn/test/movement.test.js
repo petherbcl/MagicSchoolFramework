@@ -9,6 +9,9 @@ const LOCATIONS = [
   { name: "Hogsmeade", x: 1000, y: 2000, z: 300, yaw: 90 },
   { name: "Pátio de Hogwarts", x: -50.5, y: 60, z: 7, yaw: -16.3 },
 ];
+// CHG-05: every configured location needs a camera. The default test camera is 100/200/30 cm away from the spawn point so a test
+// can tell the camera position (preview target) from the spawn point (confirm destination).
+const withCamera = l => (l.camera ? l : { ...l, camera: { x: l.x + 100, y: l.y + 200, z: l.z + 30 } });
 const LAST = { x: 11, y: 22, z: 33, yaw: 44 };
 const FLIGHT = 1300;
 const OK = { result: "ok", status: 0 };
@@ -16,7 +19,7 @@ const OK = { result: "ok", status: 0 };
 // `gap` is the SEC-06 minimum interval between native moves; the CHG-01 tests run with 0 (they test ordering, not pacing).
 function fixture({ locations = LOCATIONS, notices = { TELEPORT_FAILED: "falha" }, gap = 0, config: overrides = {} } = {}) {
   let now = 1000000;
-  const config = { ...loadConfig({ MS_SPAWN_LOCATIONS: JSON.stringify(locations) }, { envFile: null }), moveGapMs: gap, ...overrides };
+  const config = { ...loadConfig({ MS_SPAWN_LOCATIONS: JSON.stringify(locations.map(withCamera)) }, { envFile: null }), moveGapMs: gap, ...overrides };
   // Fake timers driven by the fake clock: advance() runs the timers that fell due.
   const timerQueue = [];
   const timers = { setTimeout: (fn, ms) => { const timer = { fn, due: now + ms }; timerQueue.push(timer); return timer; },
@@ -63,7 +66,7 @@ const started = async (settings, { auto = true } = {}) => { const f = fixture(se
 test("02.07: a valid select releases the hold, teleports to the configured point, then holds there; state stays choosing", async () => {
   const f = await started();
   f.spawn.select(1, { id: "patio-de-hogwarts", x: 9, y: 9, z: 9, yaw: 9 }); await f.settle();
-  assert.deepEqual(f.native.log, ["takeover", "hold:preview", "release:lobby", "release:preview", "teleport:-50.5,60", "hold:-50.5,60"]);
+  assert.deepEqual(f.native.log, ["takeover", "hold:preview", "release:lobby", "release:preview", "teleport:49.5,260", "hold:49.5,260"]);
   assert.deepEqual(f.lastState(1), { status: "choosing", selectedId: "patio-de-hogwarts", teleport: "done" });
   assert.deepEqual([...f.native.holders], ["preview"]);
   assert.equal(f.events.length, 0);
@@ -99,7 +102,7 @@ test("02.07: rapid selects A, B, C never run teleports in parallel and only the 
   assert.equal(f.native.maxActive, 1); assert.equal(f.native.teleports.length, 3);
   assert.deepEqual(f.native.teleports.map(e => e.done), [true, true, false]);
   f.native.teleports[2].resolve(OK); await f.settle();
-  assert.equal(f.native.log.at(-1), "hold:7,8");
+  assert.equal(f.native.log.at(-1), "hold:107,208");
   assert.equal(f.native.log.filter(entry => entry.startsWith("hold:") && entry !== "hold:preview").length, 1);
   assert.equal(f.lastState(1).selectedId, "c"); assert.equal(f.spawn.api.holds(1, "s1"), true);
 });
@@ -109,9 +112,9 @@ test("02.07: a replaced teleport (status 1) of an older select is ignored: no no
   f.advance(250); f.spawn.select(1, { id: "patio-de-hogwarts" }); await f.settle();
   f.native.teleports[0].resolve({ result: "replaced", status: 1 }); await f.settle();
   assert.deepEqual(f.states.filter(s => s.payload.notice), []);
-  assert.equal(f.native.log.includes("hold:1000,2000"), false);
+  assert.equal(f.native.log.includes("hold:1100,2200"), false);
   f.native.teleports[1].resolve(OK); await f.settle();
-  assert.equal(f.native.log.at(-1), "hold:-50.5,60");
+  assert.equal(f.native.log.at(-1), "hold:49.5,260");
 });
 test("02.07: a select flood is dropped without extra teleports", async () => {
   const f = await started();
@@ -155,14 +158,14 @@ test("02.09: after a failure the player is re-held at the last held point", asyn
   f.spawn.select(1, { id: "hogsmeade" }); await f.settle(); f.native.teleports[0].resolve(OK); await f.settle();
   f.advance(250); f.spawn.select(1, { id: "patio-de-hogwarts" }); await f.settle();
   f.native.teleports[1].resolve({ result: "failed", status: 4 }); await f.settle();
-  assert.equal(f.native.log.at(-1), "hold:1000,2000");
+  assert.equal(f.native.log.at(-1), "hold:1100,2200");
 });
 test("02.09: an adapter exception is a failure, the next select retries; a late stale failure is silent", async () => {
   const f = await started(); f.native.throwTeleport = true;
   f.spawn.select(1, { id: "hogsmeade" }); await f.settle();
   assert.equal(f.lastState(1).notice, "falha"); assert.deepEqual([...f.native.holders], ["preview"]);
   f.native.throwTeleport = false; f.advance(250); f.spawn.select(1, { id: "patio-de-hogwarts" }); await f.settle();
-  assert.equal(f.native.log.at(-1), "hold:-50.5,60");
+  assert.equal(f.native.log.at(-1), "hold:49.5,260");
   const g = await started(undefined, { auto: false });
   g.spawn.select(1, { id: "hogsmeade" }); await g.settle(); g.advance(250); g.spawn.select(1, { id: "patio-de-hogwarts" }); await g.settle();
   g.native.teleports[0].resolve({ result: "failed", status: 4 }); await g.settle();
@@ -233,12 +236,12 @@ test("02.08: an exit with a teleport pending cancels it, ignores the late result
   f.spawn.sessionEnded("s1");
   assert.ok(f.native.log.includes("cancel"));
   f.native.teleports[0].resolve(OK); await f.settle();
-  assert.equal(f.native.log.includes("hold:1000,2000"), false); assert.equal(f.native.holders.has("preview"), false);
+  assert.equal(f.native.log.includes("hold:1100,2200"), false); assert.equal(f.native.holders.has("preview"), false);
   // a reused playerId with a new session is not affected by the old result either
   const g = await started(undefined, { auto: false });
   g.spawn.select(1, { id: "hogsmeade" }); await g.settle();
   g.join(1, "other"); g.native.teleports[0].resolve(OK); await g.settle();
-  assert.equal(g.native.log.includes("hold:1000,2000"), false);
+  assert.equal(g.native.log.includes("hold:1100,2200"), false);
 });
 test("02.08: a replacing request hands the hold over without releasing it", async () => {
   const f = await held(); f.req(1);
@@ -258,8 +261,8 @@ test("SEC-06: the minimum interval queues a trailing move, the latest select win
   assert.equal(f.native.teleports.length, 1, "no native move inside the gap");
   f.advance(250); reject(() => f.spawn.confirm(1, { id: "c" }), "NOT_ARRIVED"); // a queued move counts as pending
   f.advance(1500); await f.settle();
-  assert.deepEqual(f.native.teleports.map(e => e.point.x), [1000, 7]);
-  assert.equal(f.native.log.at(-1), "hold:7,8"); assert.equal(f.lastState(1).selectedId, "c");
+  assert.deepEqual(f.native.teleports.map(e => e.point.x), [1100, 107]);
+  assert.equal(f.native.log.at(-1), "hold:107,208"); assert.equal(f.lastState(1).selectedId, "c");
 });
 test("SEC-06: 1000 alternating selects start at most the capped number of teleports, then notice and stay held", async () => {
   const f = await started({ gap: 1500 }); f.spawn.opened(1);
@@ -293,7 +296,7 @@ test("SEC-06: a selection that is held again is not cancelled by the unheld boun
 test("SEC-08: 24 h of idle keeps the player held (renewals observed) and the selection open; stop ends the renewals", async () => {
   const f = await started(); f.spawn.opened(1);
   f.spawn.select(1, { id: "hogsmeade" }); await f.settle();
-  const holds = () => f.native.log.filter(entry => entry === "hold:1000,2000").length;
+  const holds = () => f.native.log.filter(entry => entry === "hold:1100,2200").length;
   assert.equal(holds(), 1);
   await tickFor(f, 24 * 3600 * 1000, 60000);
   assert.ok(holds() >= 140 && holds() <= 150, "renewals " + holds());
@@ -340,7 +343,7 @@ test("SEC-10: aborting with a teleport pending falls back to the default at once
   assert.equal(f.events.length, 1); assert.equal(f.events[0].payload.reason, "CLIENT_TIMEOUT");
   const statesBefore = f.states.length;
   f.native.teleports[0].resolve(OK); await f.settle();
-  assert.equal(f.native.log.includes("hold:1000,2000"), false); assert.equal(f.native.holders.has("preview"), false);
+  assert.equal(f.native.log.includes("hold:1100,2200"), false); assert.equal(f.native.holders.has("preview"), false);
   assert.equal(f.events.length, 1); assert.equal(f.states.length, statesBefore);
 });
 
@@ -454,7 +457,7 @@ test("CHG-03: the preview teleport asks for snapToGround only when MS_SPAWN_PREV
 test("CHG-03: the hold is re-applied after a no-snap teleport and confirm stays gated as before", async () => {
   const f = await started();
   f.spawn.select(1, { id: "hogsmeade" }); await f.settle();
-  assert.equal(f.native.log.at(-1), "hold:1000,2000");
+  assert.equal(f.native.log.at(-1), "hold:1100,2200");
   assert.deepEqual(f.lastState(1), { status: "choosing", selectedId: "hogsmeade", teleport: "done" });
 });
 test("CHG-03: one timing line per select result, without coordinates or account data", async () => {
@@ -486,4 +489,46 @@ test("CHG-03: MS_SPAWN_TIMING_LOG off writes no server line and the open payload
   assert.equal(f.native.opens[0].timingLog, false);
   const on = await started();
   assert.equal(on.native.opens[0].timingLog, true);
+});
+
+// ---- CHG-05 (STORY-02.16): the preview goes to the camera position, the confirm to the spawn point -----------------------------
+const SPAWN = { x: 1000, y: 2000, z: 300, yaw: 90 }, CAM = { x: 1100, y: 2200, z: 330 }; // the default test camera of withCamera()
+test("02.16: select of a configured location teleports to the camera (with the spawn point's yaw) and holds there, not at the spawn point", async () => {
+  const f = await started();
+  f.spawn.select(1, { id: "hogsmeade", x: 5, camera: { x: 9, y: 9, z: 9 }, lookAt: { x: 8, y: 8, z: 8 } }); await f.settle();
+  assert.deepEqual({ ...f.native.teleports[0].point }, { ...CAM, yaw: SPAWN.yaw });
+  assert.deepEqual(f.native.options, [{ snapToGround: false }]);
+  assert.equal(f.native.log.at(-1), "hold:" + CAM.x + "," + CAM.y);
+  assert.equal(f.native.log.some(entry => entry === "teleport:" + SPAWN.x + "," + SPAWN.y || entry === "hold:" + SPAWN.x + "," + SPAWN.y), false);
+  assert.deepEqual(f.lastState(1), { status: "choosing", selectedId: "hogsmeade", teleport: "done" });
+});
+test("02.16: select of last keeps the stored position as target", async () => {
+  const f = fixture(); f.join(); f.req(1, LAST);
+  f.spawn.select(1, { id: "last" }); await f.settle();
+  assert.deepEqual({ ...f.native.teleports[0].point }, LAST);
+  assert.equal(f.native.log.at(-1), "hold:11,22");
+});
+test("02.16: the confirm emits the spawn point, never the camera or the lookAt", async () => {
+  const f = await started();
+  await ready(f, "hogsmeade"); f.spawn.confirm(1, { id: "hogsmeade" });
+  assert.deepEqual(f.events.at(-1).payload.destination, SPAWN);
+  assert.equal(JSON.stringify(f.events).includes("1100"), false);
+  const g = fixture(); g.join(); g.req(1, LAST);
+  g.spawn.select(1, { id: "last" }); await g.settle(); g.advance(FLIGHT); g.spawn.arrived(1, { id: "last" }); g.advance(500); g.spawn.confirm(1, { id: "last" });
+  assert.deepEqual(g.events.at(-1).payload.destination, LAST);
+});
+test("02.16: rapid selects end with the re-hold at the camera of the last one; status 1 of an older move is ignored", async () => {
+  const f = await started({ locations: [...LOCATIONS, { name: "C", x: 7, y: 8, z: 9, yaw: 0 }] }, { auto: false });
+  f.spawn.select(1, { id: "hogsmeade" }); await f.settle(); f.advance(250);
+  f.spawn.select(1, { id: "c" }); await f.settle();
+  f.native.teleports[0].resolve({ result: "replaced", status: 1 }); await f.settle();
+  assert.deepEqual(f.native.holders.has("preview"), false);
+  f.native.teleports.at(-1).resolve(OK); await f.settle();
+  assert.equal(f.native.log.at(-1), "hold:107,208");
+  assert.equal(f.native.maxActive, 1);
+});
+test("02.16: the timing log and the failure notice carry no coordinates of the camera either", async () => {
+  const f = await started({ config: { timingLog: true } });
+  f.spawn.select(1, { id: "hogsmeade" }); await f.settle();
+  assert.ok(f.native.logs.length >= 1); assert.doesNotMatch(f.native.logs.join("\n"), /1100|2200|330|1000|2000/);
 });

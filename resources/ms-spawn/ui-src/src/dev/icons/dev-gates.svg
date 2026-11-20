@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><!-- PLACEHOLDER spawn icon: BUSY and BRIGHT on purpose (tests ring / inner shadow contrast). Replace with a real 128x128 image. -->
+<rect width="128" height="128" fill="#F2EFE6"/>
+<g fill="#E1D8C0"><rect x="0" y="0" width="16" height="128"/><rect x="32" y="0" width="16" height="128"/><rect x="64" y="0" width="16" height="128"/><rect x="96" y="0" width="16" height="128"/></g>
+<g fill="#FFFFFF"><rect x="0" y="0" width="128" height="10"/><rect x="0" y="118" width="128" height="10"/></g>
+<path d="M24 128V56a40 40 0 0 1 80 0v72h-16V58a24 24 0 0 0-48 0v70z" fill="#8F8B80"/>
+<path d="M40 128V60a24 24 0 0 1 48 0v68z" fill="#CFE6B8"/>
+<circle cx="64" cy="28" r="7" fill="#FFFFFF"/>
+</svg>

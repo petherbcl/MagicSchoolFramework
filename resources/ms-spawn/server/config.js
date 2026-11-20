@@ -14,7 +14,13 @@ const MAX_LOCATIONS = 12;
 const NAME_MAX = 40;
 const RESERVED_ID = "last";
 const COORDINATE_BOUND = 1e7; // centimetres; the Overland map is far smaller
-const ENTRY_KEYS = Object.freeze(["name", "x", "y", "z", "yaw", "role"]);
+const ENTRY_KEYS = Object.freeze(["name", "x", "y", "z", "yaw", "role", "icon", "camera"]);
+const CAMERA_KEYS = Object.freeze(["x", "y", "z", "lookAt", "yaw", "pitch"]);
+const CAMERA_YAW_MAX = 360, CAMERA_PITCH_MAX = 89; // CHG-06, degrees (inclusive)
+const POINT_KEYS = Object.freeze(["x", "y", "z"]);
+// CHG-05: optional icon = a file name inside ui-src/public/icons/ (served to the page as icons/<name>); no path separators possible.
+const ICON_PATTERN = /^[a-z0-9_-]+\.(png|webp|jpg|jpeg|svg)$/;
+const ICON_MAX = 64;
 // CHG-04: optional role per location, same character class as ms-core role names; empty or missing = open to everyone.
 const ROLE_PATTERN = /^[a-z0-9_-]{1,32}$/;
 const CONTROL_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u; // control and format characters (bidi overrides, zero width) and line/paragraph separators
@@ -50,6 +56,38 @@ function slugify(name) {
 }
 function finiteWithin(value, bound) { return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= bound; }
 
+const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const samePoint = (a, b) => a.x === b.x && a.y === b.y && a.z === b.z;
+// CHG-05/CHG-06: { x, y, z } plus ONE aiming: lookAt {x,y,z} (CHG-05), or yaw (-360..360) with optional pitch (-89..89, default 0), or
+// neither (look at the spawn point, G2/G21). Every number finite; position and lookAt within the coordinate bound. lookAt with yaw or
+// pitch, pitch without yaw, and a null/non-numeric/out-of-range yaw or pitch (G33) are invalid. The result is frozen in depth: the
+// lookAt and default modes carry `lookAt`; the yaw mode carries `yaw` and `pitch` (and no lookAt). A camera that coincides with its
+// aim point has no direction: invalid (lookAt and default modes only). Errors name the location and the field, never the value.
+function parseCamera(value, spawn, where) {
+  const invalid = field => fail("LOCATION_CAMERA_INVALID", `${where} camera${field ? "." + field : ""}`);
+  if (!isObject(value)) invalid("");
+  if (Object.keys(value).some(key => !CAMERA_KEYS.includes(key))) invalid("");
+  for (const key of POINT_KEYS) if (!finiteWithin(value[key], COORDINATE_BOUND)) invalid(key);
+  const position = { x: value.x, y: value.y, z: value.z };
+  const has = key => Object.prototype.hasOwnProperty.call(value, key);
+  if (has("yaw") || has("pitch")) {
+    if (has("lookAt")) invalid("lookAt");
+    if (!has("yaw")) invalid("pitch");
+    if (!finiteWithin(value.yaw, CAMERA_YAW_MAX)) invalid("yaw");
+    if (has("pitch") && !finiteWithin(value.pitch, CAMERA_PITCH_MAX)) invalid("pitch");
+    return Object.freeze({ ...position, yaw: value.yaw, pitch: has("pitch") ? value.pitch : 0 });
+  }
+  let lookAt = { x: spawn.x, y: spawn.y, z: spawn.z };
+  if (value.lookAt !== undefined) {
+    const raw = value.lookAt;
+    if (!isObject(raw) || Object.keys(raw).some(key => !POINT_KEYS.includes(key))) invalid("lookAt");
+    for (const key of POINT_KEYS) if (!finiteWithin(raw[key], COORDINATE_BOUND)) invalid("lookAt." + key);
+    lookAt = { x: raw.x, y: raw.y, z: raw.z };
+  }
+  if (samePoint(position, lookAt)) invalid(value.lookAt === undefined ? "" : "lookAt");
+  return Object.freeze({ ...position, lookAt: Object.freeze(lookAt) });
+}
+
 function parseLocations(raw) {
   if (raw === undefined || raw.trim() === "") return [];
   if (raw.length > LOCATIONS_MAX_CHARS) fail("LOCATIONS_TOO_LARGE");
@@ -74,8 +112,13 @@ function parseLocations(raw) {
     if (![entry.x, entry.y, entry.z].every(value => finiteWithin(value, COORDINATE_BOUND)) || !finiteWithin(entry.yaw, 360)) fail("LOCATION_NUMBER_INVALID", where);
     // The role never takes part in the id or in the uniqueness checks. Wrong type or characters fail closed; an unknown role is fine (never matches).
     if (entry.role !== undefined && (typeof entry.role !== "string" || (entry.role !== "" && !ROLE_PATTERN.test(entry.role)))) fail("LOCATION_ROLE_INVALID", where);
+    // CHG-05: icon is a validated file name only; "" and null mean no icon (like role). It never takes part in the id or uniqueness.
+    const icon = entry.icon === undefined || entry.icon === null || entry.icon === "" ? null : entry.icon;
+    if (icon !== null && (typeof icon !== "string" || icon.length > ICON_MAX || !ICON_PATTERN.test(icon))) fail("LOCATION_ICON_INVALID", where);
+    // CHG-05: the camera is mandatory for every configured location (an old-format entry fails closed until migrated).
+    const camera = parseCamera(entry.camera, entry, `${where} (${JSON.stringify(name)})`);
     names.add(name.toLowerCase()); ids.add(id);
-    locations.push(Object.freeze({ id, name, x: entry.x, y: entry.y, z: entry.z, yaw: entry.yaw, ...(entry.role ? { role: entry.role } : {}) }));
+    locations.push(Object.freeze({ id, name, x: entry.x, y: entry.y, z: entry.z, yaw: entry.yaw, ...(entry.role ? { role: entry.role } : {}), ...(icon ? { icon } : {}), camera }));
   });
   return locations;
 }
