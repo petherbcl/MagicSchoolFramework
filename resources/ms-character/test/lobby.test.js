@@ -24,7 +24,7 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
     const repository = new Repository(sql), sent = [], kicks = [], events = [], applied = [], released = [], sessions = new Map(), entered = [];
     const core = { Users: { get: id => sessions.get(id) || null, isReady: id => sessions.get(id)?.ready === true },
       Players: { async enterGame(id, input) { if (overrides.enterGame) await overrides.enterGame(id, input); entered.push({ playerId: id, ...input }); } } };
-    const game = { enterLobby(p, l) { l.previous = {}; }, release(p) { released.push(p.id); }, cancel() {},
+    const game = { enterLobby(p, l) { l.previous = {}; }, async settleLobby() { return true; }, release(p) { released.push(p.id); }, cancel() {},
       send(p, name, payload) { sent.push({ playerId: p.id, name, payload }); },
       kick(p, reason) { kicks.push({ playerId: p.id, reason }); },
       async apply(p, character) { applied.push({ playerId: p.id, character }); },
@@ -47,7 +47,7 @@ for (const target of DIALECTS) describe(target.name, { skip: target.skip }, () =
 
   test("a player without characters opens an empty lobby in a private world", async t => {
     const f = await fixture(t); await f.join();
-    assert.deepEqual(f.state(1), { status: "lobby", characters: [], maxCharacters: 1, characterId: null });
+    assert.deepEqual(f.state(1), { status: "lobby", characters: [], maxCharacters: 1, characterId: null, groundSnapped: true });
     assert.equal(f.lobby.api.isPlaying(1), false); assert.deepEqual(f.released, []);
     assert.equal(f.events.at(-1).name, "ms:characterLobby");
   });

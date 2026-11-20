@@ -24,7 +24,7 @@ function fixture({ location = OVERLAND, spawnReady = true, enterGame, throwOn = 
   const events = [], sent = [], applied = [], released = [], entered = [], order = [];
   const core = { Users: { get: id => sessions.get(id) || null, isReady: id => sessions.get(id)?.ready === true },
     Players: { async enterGame(id, input) { order.push("enterGame"); if (enterGame) await enterGame(); entered.push({ id, ...input }); } } };
-  const game = { enterLobby(p, l) { l.previous = {}; }, release(p) { order.push("release"); released.push(p.id); }, cancel() {},
+  const game = { enterLobby(p, l) { l.previous = {}; }, async settleLobby() { return true; }, release(p) { order.push("release"); released.push(p.id); }, cancel() {},
     send(p, name, payload) { if (payload.status === throwOn) throw new Error("player gone"); sent.push(payload.status); },
     kick() {}, async apply(p, c, isCurrent, token, destination) { order.push("apply"); applied.push({ status: isCurrent() ? "current" : "stale", destination }); },
     capture: (p, previous) => previous };
@@ -67,7 +67,7 @@ test("ms-spawn absent or not ready: no event, no choosingSpawn, same destination
   await f.lobby.select(1, "1");
   assert.equal(f.requested().length, 0); assert.equal(f.sent.includes("choosingSpawn"), false);
   assert.deepEqual(f.applied, [{ status: "current", destination: undefined }]);
-  const g = createLobby({ ...{ repository: { list: async () => [], get: async () => null }, config, game: { enterLobby(p, l) { l.previous = {}; }, send() {}, cancel() {}, kick() {} },
+  const g = createLobby({ ...{ repository: { list: async () => [], get: async () => null }, config, game: { enterLobby(p, l) { l.previous = {}; }, async settleLobby() { return true; }, send() {}, cancel() {}, kick() {} },
     core: { Users: { get: () => ({ sessionId: "s1" }), isReady: () => true } }, logger: { error() {} } } }); // no `spawn` at all
   await g.open({ id: 1 }, { sessionId: "s1", userId: "1" });
 });
@@ -88,7 +88,7 @@ test("a synchronous ms:spawnCancelled from the emit itself is not lost", async (
   const g = fixture(), seen = [];
   let lobby;
   lobby = createLobby({ repository: { list: async () => [g.character], get: async () => g.character, touch: async () => {}, save: async () => g.character, audit: async () => {} }, config,
-    game: { enterLobby(p, l) { l.previous = {}; }, release() {}, cancel() {}, send() {}, kick() {}, async apply(p, c, ok, t, d) { seen.push(["apply", d]); }, capture: (p, prev) => prev },
+    game: { enterLobby(p, l) { l.previous = {}; }, async settleLobby() { return true; }, release() {}, cancel() {}, send() {}, kick() {}, async apply(p, c, ok, t, d) { seen.push(["apply", d]); }, capture: (p, prev) => prev },
     core: { Users: { get: () => ({ sessionId: "s1" }), isReady: () => true }, Players: { async enterGame() {} } }, spawn: { isReady: () => true }, clock: () => 1e9,
     emit: (name, payload) => { if (name === "ms:spawnSelectionRequested") lobby.spawnCancelled({ playerId: payload.playerId, sessionId: payload.sessionId, reason: "NO_OPTIONS" }); },
     logger: { error() {} } });
@@ -162,7 +162,7 @@ test("the session leaving ready during choosingSpawn makes a later answer fail c
 test("an apply failure after the spawn answer detaches the player (no half-applied state)", async () => {
   const f = fixture(); await f.open();
   const failing = createLobby({ repository: { list: async () => [f.character], get: async () => f.character, touch: async () => {}, save: async () => f.character, audit: async () => {} }, config,
-    game: { enterLobby(p, l) { l.previous = {}; }, release() {}, cancel() {}, send() {}, kick(p, reason) { f.order.push("kick:" + reason); }, async apply() { throw new Error("native"); }, capture: (p, prev) => prev },
+    game: { enterLobby(p, l) { l.previous = {}; }, async settleLobby() { return true; }, release() {}, cancel() {}, send() {}, kick(p, reason) { f.order.push("kick:" + reason); }, async apply() { throw new Error("native"); }, capture: (p, prev) => prev },
     core: { Users: { get: () => ({ sessionId: "s1" }), isReady: () => true }, Players: { async enterGame() { f.order.push("enterGame"); } } }, spawn: { isReady: () => true }, clock: () => 1e9,
     emit: () => {}, logger: { error() {} } });
   await failing.open({ id: 1 }, { sessionId: "s1", userId: "1" });

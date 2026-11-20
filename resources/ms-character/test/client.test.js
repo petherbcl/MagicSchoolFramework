@@ -13,13 +13,13 @@ const same = (actual, expected) => assert.deepStrictEqual(plain(actual), plain(e
 
 const SOURCE = fs.readFileSync(path.join(__dirname, "..", "client", "main.js"), "utf8");
 
-function harness({ screenWidth = 1920, beginResult = true, schemaReadyAfterPolls = 0, importThrows = false } = {}) {
+function harness({ screenWidth = 1920, beginResult = true, schemaReadyAfterPolls = 0, importThrows = false, groundAfterPolls = 0, groundThrows = false } = {}) {
   const calls = [];
   const log = (name, ...args) => calls.push([name, ...args]);
   const handlers = {};
   const viewHandlers = {};
   let timers = [], nextTimer = 1, now = 0;
-  let active = false, polls = 0, schemaGender = 0, appliedPreset = null;
+  let active = false, groundPolls = 0, polls = 0, schemaGender = 0, appliedPreset = null;
   const account = { format: "arcanemp-look", gender: "male", pronoun: "wizard", presets: { hairStyle: "account" } };
   let current = account;
 
@@ -53,7 +53,8 @@ function harness({ screenWidth = 1920, beginResult = true, schemaReadyAfterPolls
       getScreenSize: () => ({ width: screenWidth, height: 1080 }),
     },
     Game: { setPauseMenuEnabled() {}, setActionScreenEnabled() {}, setToolWheelEnabled() {}, notify() {} },
-    LocalPlayer: { stopPlayerInput() {}, restorePlayerInput() {} },
+    LocalPlayer: { stopPlayerInput() {}, restorePlayerInput() {}, getPosition: () => ({ x: 1, y: 2, z: 3 }) },
+    World: { lineTrace: () => { log("lineTrace"); if (groundThrows) throw new Error("no trace"); return groundPolls++ < groundAfterPolls ? null : { startPenetrating: false }; } },
     Creator,
     CreatorPreview: {
       setCamera: frame => log("setCamera", frame),
@@ -88,7 +89,8 @@ const LOBBY = { status: "lobby", characters: [
   { characterId: "2", firstName: "C", lastName: "D", house: "Slytherin", look: null },
 ] };
 
-function openLobby(h) { h.state(LOBBY); h.ready(); }
+// The lobby session opens once the world around the spawn has loaded: the first ground check runs 250 ms after the state.
+function openLobby(h) { h.state(LOBBY); h.ready(); h.advance(250); }
 
 test("lobby ready opens one session, saves originalLook and frames the body", () => {
   const h = harness();
@@ -310,4 +312,52 @@ test("cleanup still completes when importLook throws", () => {
   h.state({ status: "playing", characters: [] });
   same(h.names().filter(n => n === "cancel" || n === "restoreCamera"), ["cancel", "restoreCamera"]);
   assert.equal(h.isActive(), false);
+});
+
+const worldFlags = h => h.calls.filter(c => c[0] === "emit" && c[1] === "state").map(c => c[2].worldLoaded);
+
+test("world gate: the page gets worldLoaded=false and no lobby session opens until the ground under the player loads", () => {
+  const h = harness({ groundAfterPolls: 2 });
+  h.state({ status: "loading" }); h.ready(); h.state(LOBBY);
+  assert.equal(worldFlags(h).every(flag => flag === false), true);
+  h.advance(250); h.advance(250); // two checks miss
+  assert.equal(h.names().includes("begin"), false, "no preview model while the world loads");
+  assert.equal(worldFlags(h).every(flag => flag === false), true);
+  h.advance(250); // third check hits
+  assert.equal(worldFlags(h).at(-1), true);
+  assert.equal(h.names().filter(n => n === "begin").length, 1);
+  h.advance(5000); assert.equal(h.names().filter(n => n === "lineTrace").length, 3, "polling stops once loaded");
+});
+
+test("world gate: the ceiling and a failing check never block the player", () => {
+  const slow = harness({ groundAfterPolls: 1e9 });
+  slow.state(LOBBY); slow.ready(); slow.advance(4000);
+  assert.equal(worldFlags(slow).at(-1), false);
+  slow.advance(1500);
+  assert.equal(worldFlags(slow).at(-1), true);
+  assert.equal(slow.names().filter(n => n === "begin").length, 1);
+  const broken = harness({ groundThrows: true });
+  broken.state(LOBBY); broken.ready(); broken.advance(250);
+  assert.equal(worldFlags(broken).at(-1), true);
+});
+
+test("world gate: a new lobby (status loading) waits for its world again, other states keep it open", () => {
+  const h = harness();
+  openLobby(h);
+  h.state({ ...LOBBY, status: "creating" }); h.state(LOBBY);
+  assert.equal(worldFlags(h).at(-1), true);
+  h.state({ status: "playing" }); h.state({ status: "loading" }); h.ready();
+  assert.equal(worldFlags(h).at(-1), false);
+});
+
+test("world gate: groundSnapped from the server opens the lobby at once, and the loading state never polls", () => {
+  const h = harness({ groundAfterPolls: 1e9 });
+  h.state({ status: "loading", characters: [], maxCharacters: 1, groundSnapped: false }); h.ready();
+  h.advance(20000);
+  assert.equal(h.names().includes("lineTrace"), false, "no ground check while the server still waits");
+  assert.equal(worldFlags(h).every(flag => flag === false), true);
+  h.state({ ...LOBBY, groundSnapped: true });
+  assert.equal(worldFlags(h).at(-1), true);
+  assert.equal(h.names().filter(n => n === "begin").length, 1);
+  assert.equal(h.names().includes("lineTrace"), false, "the game's own ground wait replaces the trace");
 });

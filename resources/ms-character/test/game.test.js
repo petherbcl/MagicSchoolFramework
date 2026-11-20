@@ -73,3 +73,33 @@ test("a look the game rejects does not stop the restore and the stored look is k
   game.complete(1, "teleport", 42, 0); await restoring;
   assert.deepEqual(game.capture(player, { look: stored }).look, stored, "the default look must not overwrite the stored one");
 });
+
+test("settleLobby uses the game's ground wait and re-holds the player at the landing point", async () => {
+  const game = createGameAdapter(config), { player } = nativePlayer();
+  const holds = [], released = [], teleports = [];
+  player.hold = options => { holds.push(options); return true; }; player.release = owner => { released.push(owner); };
+  player.teleport = (x, y, z, options) => { teleports.push({ x, y, z, options }); return 77; };
+  const settling = game.settleLobby(player, { token: 1 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(released, ["ms-character:lobby"], "the lobby hold would clamp the landing");
+  assert.equal(teleports[0].options.snapToGround, true);
+  assert.deepEqual({ x: teleports[0].x, y: teleports[0].y, z: teleports[0].z }, config.lobby.position);
+  game.complete(1, "teleport", 77, 0, { groundSnapped: true, destination: { x: 5, y: 6, z: 7, yaw: 0 } });
+  assert.equal(await settling, true);
+  assert.deepEqual({ x: holds[0].x, y: holds[0].y, z: holds[0].z, owner: holds[0].owner }, { x: 5, y: 6, z: 7, owner: "ms-character:lobby" });
+});
+test("settleLobby resolves false, still re-holds at the anchor and never throws when the ground is not confirmed", async () => {
+  for (const finish of [
+    (game) => game.complete(1, "teleport", 8, 0, { groundSnapped: false, destination: null }),
+    (game) => game.complete(1, "teleport", 8, 4, undefined),
+  ]) {
+    const game = createGameAdapter(config), { player } = nativePlayer(); const holds = [];
+    player.hold = options => { holds.push(options); return true; }; player.teleport = () => 8;
+    const settling = game.settleLobby(player, { token: 1 });
+    await new Promise(resolve => setImmediate(resolve)); finish(game);
+    assert.equal(await settling, false);
+    assert.deepEqual({ x: holds[0].x, y: holds[0].y, z: holds[0].z }, config.lobby.position);
+  }
+  const game = createGameAdapter(config), { player } = nativePlayer(); player.teleport = () => { throw new Error("native"); };
+  assert.equal(await game.settleLobby(player, { token: 1 }), false);
+});

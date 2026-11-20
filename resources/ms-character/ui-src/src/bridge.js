@@ -33,6 +33,9 @@ import { useEffect, useState } from "react";
 //   "state"           { status, characters: LobbyCharacter[], maxCharacters, characterId }
 //                     status: "loading" | "lobby" | "creating" | "deleting" | "applying" | "playing" | "closed"
 //                     ("choosingSpawn" is handled by client/main.js and never reaches the page: ms-spawn owns the screen)
+//                     worldLoaded: added by client/main.js. false while the world around the lobby spawn is still loading: the page shows only
+//                     the opaque "A preparar o mundo" cover (no lobby, no preview model). Absent (dev mock) = no wait.
+//                     groundSnapped (server → client script only): the game confirmed the ground under the lobby spawn (Player.teleport snapToGround).
 //                     LobbyCharacter: { characterId, firstName, lastName, house,
 //                                       lastPlayedAt: string | null (ISO), look: LookJson | null }
 //   "notice"          { text }                              Server notice (pt-PT) for the alert zone.

@@ -69,7 +69,7 @@ Events.on("ms:spawnSelected", payload => { if (ready) lobby.spawnSelected(payloa
 Events.on("ms:spawnCancelled", payload => { if (ready) lobby.spawnCancelled(payload); });
 Events.on("ms:sessionEnded", ({ sessionId }) => { if (ready) lobby.sessionEnded(sessionId); });
 Events.on("playerDisconnect", player => { rateNoticeAt.delete(player.id); if (lobby) lobby.disconnect(player.id).catch(() => console.error("[ms-character] disconnect save failed")); });
-Events.on("playerTeleportComplete", (player, requestId, status) => game?.complete(player.id, "teleport", requestId, status));
+Events.on("playerTeleportComplete", (player, requestId, status, completion) => game?.complete(player.id, "teleport", requestId, status, completion));
 Events.on("playerMapTravelComplete", (player, requestId, status) => game?.complete(player.id, "map", requestId, status));
 Events.onClient("ms-character:sync", player => { if (open()) safe(player, () => lobby.sync(player.id)); });
 Events.onClient("ms-character:create", (player, input) => { if (open()) safe(player, () => lobby.create(player.id, input)); });

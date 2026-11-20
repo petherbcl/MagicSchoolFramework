@@ -40,7 +40,8 @@ function createLobby({ repository, config, game, core, spawn = { isReady: () => 
   function send(l) {
     if (lobbies.get(l.playerId) !== l) return;
     game.send(l.player, "ms-character:state", { status: l.status, characters: l.characters.map(lobbyCharacter),
-      maxCharacters: config.maxCharacters, characterId: l.character?.characterId || null });
+      maxCharacters: config.maxCharacters, characterId: l.character?.characterId || null,
+      groundSnapped: l.groundSnapped === true });
   }
   // A refused ownership check leaves a trace (the throttle already caps how often this can happen), then rethrows.
   async function denied(l, action, characterId, error) {
@@ -82,7 +83,9 @@ function createLobby({ repository, config, game, core, spawn = { isReady: () => 
       ensure(l);
       game.enterLobby(player, l);
       send(l);
-      l.characters = await repository.list(userId); ensure(l);
+      // The characters load while the game confirms the ground under the lobby spawn; the lobby opens when both are done.
+      const [characters, groundSnapped] = await Promise.all([repository.list(userId), game.settleLobby(player, l)]); ensure(l);
+      l.characters = characters; l.groundSnapped = groundSnapped === true;
       l.status = "lobby"; send(l);
       event("ms:characterLobby", { playerId: l.playerId, sessionId, userId, characters: l.characters.length });
       return l.characters.map(summary);

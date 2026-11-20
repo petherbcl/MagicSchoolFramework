@@ -347,7 +347,44 @@ function onLobbyPreview(payload) {
 
 // ---- View --------------------------------------------------------------------------------------------------------
 
-function flush() { if (pageReady && view !== null && lastState) Web.emit(view, "state", lastState); }
+// ---- World gate: the lobby spawn is only shown once the world around it has loaded ------------------------------------
+// The server confirms the ground with the game's own wait (Player.teleport snapToGround holds the player until the floor
+// loads; playerTeleportComplete reports groundSnapped) and sends groundSnapped=true when the lobby opens: then the world
+// is loaded. While the state is still "loading" nothing is checked here. Only when the server could not confirm it
+// (groundSnapped false) does this script poll World.lineTrace under the player as a fallback (docs/arcane-mp/guides/world/
+// line-traces.md: a null result can mean "not loaded yet"), for at most WORLD_TIMEOUT_MS. UI only: it authorises nothing,
+// and a failing check or the ceiling shows the page anyway (never block a player forever).
+const WORLD_POLL_MS = 250, WORLD_TIMEOUT_MS = 5000;
+const GROUND_OBJECT_TYPES = ["worldStatic", "shallowWater", "deepWater"];
+let worldLoaded = false, worldTimer = null, worldStartedAt = 0;
+function groundLoaded() {
+  const at = LocalPlayer.getPosition();
+  if (!at) return false;
+  const hit = World.lineTrace({ x: at.x, y: at.y, z: at.z + 100 }, { x: at.x, y: at.y, z: at.z - 10000 }, { objectTypes: GROUND_OBJECT_TYPES });
+  return Boolean(hit) && hit.startPenetrating !== true;
+}
+function setWorldLoaded() {
+  worldTimer = cancelTimer(worldTimer); worldLoaded = true;
+  flush();
+  if (pageReady && lastState && lastState.status === "lobby") openLobbySession();
+}
+function pollWorld() {
+  worldTimer = null;
+  if (worldLoaded || lastState === null) return;
+  let loaded;
+  try { loaded = groundLoaded(); }
+  catch (error) { console.log("[ms-character] world check failed: " + (error && error.message ? error.message : error)); setWorldLoaded(); return; }
+  if (loaded || Date.now() - worldStartedAt >= WORLD_TIMEOUT_MS) { setWorldLoaded(); return; }
+  worldTimer = setTimeout(pollWorld, WORLD_POLL_MS);
+}
+function waitForWorld() {
+  if (worldLoaded || worldTimer !== null) return;
+  worldStartedAt = Date.now();
+  worldTimer = setTimeout(pollWorld, WORLD_POLL_MS);
+}
+function resetWorldGate() { worldTimer = cancelTimer(worldTimer); worldLoaded = false; }
+
+function flush() { if (pageReady && view !== null && lastState) Web.emit(view, "state", { ...lastState, worldLoaded }); }
 function closeView() {
   if (view !== null) Web.destroyView(view);
   view = null; pageReady = false;
@@ -357,7 +394,8 @@ function closeView() {
 let handedOver = false;
 function show(state) {
   lastState = state;
-  if (state.status === "playing" || state.status === "closed") handedOver = false;
+  if (state.status === "playing" || state.status === "closed") { handedOver = false; resetWorldGate(); }
+  if (state.status === "loading") resetWorldGate(); // a new lobby: its spawn has to load again
   if (state.status === "playing") { release(); closeView(); setControls(true); return; }
   if (state.status === "choosingSpawn") { handedOver = true; setControls(false); release(); closeView(); return; }
   if (handedOver && state.status === "applying") return;
@@ -365,7 +403,7 @@ function show(state) {
   setControls(false);
   if (view === null) {
     view = Web.createView("fw://resources/ms-character/client/ui/index.html", { focus: true });
-    Web.on(view, "ready", () => { pageReady = true; flush(); if (lastState && lastState.status === "lobby") openLobbySession(); });
+    Web.on(view, "ready", () => { pageReady = true; flush(); if (worldLoaded && lastState && lastState.status === "lobby") openLobbySession(); });
     Web.on(view, "create", onCreate);
     Web.on(view, "select", onSelect);
     Web.on(view, "delete", payload => Events.emitServer("ms-character:delete", payload));
@@ -380,9 +418,13 @@ function show(state) {
     Web.on(view, "creator:voice", onVoice);
     Web.on(view, "creator:voice:preview", onVoicePreview);
   }
+  if (state.status !== "loading") {
+    if (state.groundSnapped === true) { worldTimer = cancelTimer(worldTimer); worldLoaded = true; }
+    else waitForWorld();
+  }
   flush();
   // Back in the lobby after a failed select/create: the session was released, so open it again.
-  if (pageReady && state.status === "lobby") openLobbySession();
+  if (pageReady && worldLoaded && state.status === "lobby") openLobbySession();
 }
 
 Events.on("creatorChanged", state => {

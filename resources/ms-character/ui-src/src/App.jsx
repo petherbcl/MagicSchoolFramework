@@ -15,11 +15,14 @@ const DELETE_TIMEOUT_MS = 10000; // the server never answered a delete: unblock 
 const CREATOR_FAILED = "Não foi possível abrir o criador. Tenta de novo; se o problema persistir, contacta a equipa.";
 const DELETE_FAILED = "Não foi possível apagar a personagem. Tenta de novo; se o problema persistir, contacta a equipa.";
 const LOBBY_HINTS = [{ keys: ["Tab"], label: "Navegar" }, { keys: ["Enter"], label: "Jogar" }, { keys: ["Del"], label: "Apagar" }];
-// Vignette variant per displayed screen; "entering" is opaque and has none.
-const VIGNETTE = { loading: "loading", lobby: "lobby", creator: "creator", entering: null };
+// Vignette variant per displayed screen; "entering" and "world" are opaque and have none.
+const VIGNETTE = { loading: "loading", lobby: "lobby", creator: "creator", entering: null, world: null };
 
 // Which screen the server state asks for. "playing" keeps the opaque screen until the client closes the page.
 function targetScreen(state, creating, creatorFailed) {
+  // The client script sets worldLoaded=false while the world around the lobby spawn is still streaming in:
+  // nothing of the world or the lobby shows until it is fully loaded (absent in the dev mock = no wait).
+  if (state && state.worldLoaded === false && state.status !== "applying" && state.status !== "playing") return "world";
   if (!state || state.status === "loading") return "loading";
   if (state.status === "applying" || state.status === "playing") return "entering";
   if (creatorFailed) return "lobby"; // creator:error: show the lobby (also without characters) with the notice
@@ -146,6 +149,7 @@ export default function App() {
 
   let content;
   if (screen === "loading") content = <Loading exiting={exiting} />;
+  else if (screen === "world") content = <Loading variant="world" />;
   else if (screen === "entering") content = <Loading variant="entering" />;
   else if (screen === "creator") {
     content = (
